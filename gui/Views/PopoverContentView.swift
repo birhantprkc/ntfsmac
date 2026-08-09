@@ -301,7 +301,9 @@ public struct PopoverContentView: View {
             }
 
             if diagnosePresentation.isVisible {
-                DiagnosePanel(runner: diagnoseRunner, mountState: appState.state)
+                DiagnosePanel(runner: diagnoseRunner, mountState: appState.state) {
+                    diagnosePresentation.hide()
+                }
             }
 
             Divider()
@@ -416,8 +418,20 @@ public struct PopoverContentView: View {
             .help(TooltipCopy.text(for: .settings))
 
             Button {
+                let mode = DiagnoseActionMode.resolve(
+                    commandPressed: NSEvent.modifierFlags.contains(.command)
+                )
                 diagnosePresentation.show()
-                Task { await diagnoseRunner.run() }
+                Task {
+                    switch mode {
+                    case .summary:
+                        await diagnoseRunner.run()
+                    case .developerJSONExport:
+                        if let document = await diagnoseRunner.runForDeveloperExport() {
+                            DeveloperDiagnoseSavePanel.present(document: document)
+                        }
+                    }
+                }
             } label: {
                 HStack(spacing: 5) {
                     DiagnoseGlyph()
@@ -465,7 +479,7 @@ public struct PopoverContentView: View {
 
 enum FDAPromptCopy {
     static let helperServiceName = "com.khr898.ntfsmac.helper"
-    static let instructions = "macOS lists the ntfsmac Helper under its technical service name, \(helperServiceName). Enable that entry in Full Disk Access. If it is not listed, add it with the '+' button."
+    static let instructions = "macOS lists ntfsmac Helper under its technical service name, \(helperServiceName), and may show a generic executable icon because the helper is a standalone privileged tool. Enable that exact entry in Full Disk Access. If it is not listed, add it with the '+' button."
 }
 
 /// A modal prompt guiding the user to grant Full Disk Access to the privileged helper daemon.

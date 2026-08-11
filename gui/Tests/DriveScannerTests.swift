@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import HelperShared
 @testable import NtfsmacGUI
@@ -197,6 +198,74 @@ private let sampleExtOutput = """
     #expect(runner.calls.count == 1)
     #expect(runner.calls[0].path == "/stub/anylinuxfs")
     #expect(runner.calls[0].args == ["list"])
+}
+
+@MainActor
+@Test func productionDriveScanDoesNotBlockMainActor() async throws {
+    let tempDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: tempDirectory,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+    let slowList = tempDirectory.appendingPathComponent("slow-list")
+    try "#!/bin/sh\nsleep 0.5\nexit 0\n".write(
+        to: slowList,
+        atomically: true,
+        encoding: .utf8
+    )
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: slowList.path
+    )
+
+    let scanner = DriveScanner(anylinuxfsPath: slowList.path)
+    let clock = ContinuousClock()
+    let startedAt = clock.now
+    let scanTask = Task { await scanner.refresh() }
+
+    try await Task.sleep(for: .milliseconds(50))
+    let mainActorDelay = startedAt.duration(to: clock.now)
+    #expect(
+        mainActorDelay < .milliseconds(350),
+        "the synchronous list subprocess blocked the menu-bar main actor"
+    )
+
+    await scanTask.value
+}
+
+@MainActor
+@Test func productionDriveScanTerminatesAStalledProbe() async throws {
+    let tempDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: tempDirectory,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+    let stalledList = tempDirectory.appendingPathComponent("stalled-list")
+    try "#!/bin/sh\nwhile :; do :; done\n".write(
+        to: stalledList,
+        atomically: true,
+        encoding: .utf8
+    )
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: stalledList.path
+    )
+
+    let scanner = DriveScanner(anylinuxfsPath: stalledList.path, scanTimeout: 0.05)
+    let clock = ContinuousClock()
+    let startedAt = clock.now
+
+    await scanner.refresh()
+
+    #expect(startedAt.duration(to: clock.now) < .seconds(1))
+    #expect(scanner.drives.isEmpty)
+    #expect(scanner.lastError?.contains("timed out") == true)
 }
 
 private struct ListCall: Equatable {

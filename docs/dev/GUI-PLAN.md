@@ -40,7 +40,7 @@ mounting, mounted, warning, and error states.
 2. One-click mount / unmount.
 3. Live mount status + transfer speed.
 4. Dirty-drive read-only detection + warning.
-5. Security indicators (isolated network ✓, VPN-bypass ✓).
+5. Security indicators (isolated network, VPN bypass, and PF status) with presentation-only Hide/Show.
 6. Open mounted volume in Finder.
 7. Diagnose (runs the CLI diagnostic, shows result).
 8. First-run helper install (one auth prompt, via SMJobBless).
@@ -73,6 +73,7 @@ mounting, mounted, warning, and error states.
 | `Open in Finder` | Reveal mount point | Mounted |
 | `Unmount` | Safe unmount + pf/route teardown | Mounted |
 | Speed bar | Live throughput (read-only display) | Mounting / mounted |
+| SECURITY `Hide` / `Show` | Collapse or restore only the measured security rows | Mounted |
 | ⚙ / `Quit` | As above | Always |
 
 ### Read-only (dirty) state — extra
@@ -99,6 +100,11 @@ or starting a mount; it becomes a warning only when a drive is already mounted a
 network is expected to be active. Unknown or malformed values are shown neutrally rather than as
 confirmed failures. Short explanations remain available through native help and accessibility
 text without widening the popover.
+
+The GUI renders the same privacy-safe runtime contract as CLI text and JSON: expected and detected
+host-runtime versions, audited source commits, the approved Alpine tag/digest, selected cache state,
+and installed guest package versions. SECURITY Hide/Show changes presentation only; it never alters
+mount, helper, or measured security state.
 
 ### Settings page
 

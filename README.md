@@ -25,10 +25,12 @@ are already built into the vendored kernel image.
 - **Multiple concurrent mounts** — mount more than one drive at once. The CLI mounts each
   device independently, and the GUI's mounted view lists every mounted drive with its own
   status and speed indicator (the old single-drive "Combined" speed readout is gone).
-- **More useful, privacy-safe diagnostics** — CLI and GUI reports now identify the ntfsmac
-  version/build, macOS version, architecture, helper presence, affected runtime components,
-  VPN tunnel use as a yes/no signal, and the active NFS mount count without exposing local
-  paths or network identity.
+- **More useful, privacy-safe diagnostics** — CLI and GUI reports identify expected and detected
+  host-runtime versions, audited source commits, the installed Alpine/cache version and guest
+  package versions, plus app/build, system, helper, kernel, network, and mount health without
+  exposing local paths or network identity.
+- **Reproducible first-run environment** — the runtime pulls an immutable Alpine arm64 digest,
+  keeps versioned caches side by side, and packaging rejects floating image references.
 
 ## Requirements
 
@@ -87,6 +89,9 @@ What each line means:
 | `vendor binaries missing: N` (N > 0) | A vendored binary (`anylinuxfs`/`gvproxy`/`vmnet-helper`/`vmproxy`) wasn't found. Reinstall: `brew reinstall ntfsmac`, or re-run `install.sh`. |
 | `quarantined binaries: N` (N > 0) | Gatekeeper quarantined a vendored binary, so it won't launch. Reinstall (the installer strips the xattr), or clear it: `xattr -dr com.apple.quarantine <path>`. |
 | `kernel pin: mismatch` / `missing` | The pinned `modules.squashfs` kernel image doesn't match `sources.lock`. Reinstall to restore the pinned image. |
+| `anylinuxfs version: <detected> (expected <version>)` | Separates the installed host runtime from the audited source version. A mismatch is degraded and should be repaired by reinstalling. |
+| `Alpine runtime: <state>` | Reports the approved tag/digest and whether the matching versioned cache is complete, missing, legacy, interrupted, or mismatched; Diagnose never downloads or deletes a cache. |
+| `guest ntfs-3g` / `guest nfs-utils` | Reports fixed package-version tokens read from the selected guest cache, or `not installed` / `unavailable` without exposing local paths. |
 | `vmnet bridge: down` | Expected when nothing is mounted; it should read `up` while a volume is mounted. If it stays `down` during a mount, approve the vmnet-helper permission prompt and retry. |
 | `VPN default route: detected` | A tunnel owns the default route. This is informational; the report does not record which VPN/interface or any address/route details. |
 | `current NFS mount count: N` | Number of active NFS mounts, without their names or paths. |
@@ -98,13 +103,11 @@ Helper**, not an unrelated package; enable that exact entry. The SMJobBless help
 executable rather than an app/resource bundle, so its icon cannot be customized independently
 without changing the privileged-helper architecture.
 
-**First mount needs network (one-time).** The first time you mount a drive, the
-vendored `init-rootfs` pulls a pinned Alpine Linux image (~50–150 MB) from Docker Hub and
-unpacks it into `~/.anylinuxfs/alpine`. This needs an internet connection and takes roughly
-1–2 minutes — the CLI prints `mount: first run — downloading and initializing the Linux
-environment…` so it doesn't look like a hang. Every mount after that reuses the cached
-rootfs and starts the microVM directly, with no network needed. If the first mount fails
-offline, get online once, let it finish, then subsequent mounts work on a cold start.
+**First mount needs network (one-time per approved runtime).** The first mount that needs a
+runtime pulls the exact Alpine Linux arm64 image identified by the tag and SHA-256 digest in
+`build/sources.lock` (~50–150 MB). It initializes a tag/digest/version-specific cache beside any
+legacy or older cache instead of replacing it. Installation, Diagnose, and opening Settings never
+download or remove a rootfs. Once the matching cache is complete, later mounts reuse it offline.
 
 **Can't write to an ext volume / `Operation not permitted`.** ext2/3/4 are real
 Unix filesystems with their own ownership bits, so ntfsmac auto-passes

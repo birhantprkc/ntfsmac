@@ -5,6 +5,12 @@ touch `pf`/route state, and drives a Linux microVM with a host-only network brid
 anything in `helper/`, `gui/Helper/`, `gui/FirstRun/`, and the mount/unmount CLI paths as
 security-sensitive.
 
+The root mount transaction owns and measures one PF child anchor, PF enable reference, and optional
+exact VPN-bypass route per session before the backend NFS readiness check can complete. The GUI's
+three SECURITY rows remain `unknown` until the transaction's reason-coded evidence is wired into
+that presentation; `unknown` describes the UI evidence boundary, not the absence of lower-layer
+enforcement.
+
 ## Reporting a vulnerability
 
 Please **do not** open a public GitHub issue for a suspected vulnerability. Instead, email
@@ -30,3 +36,6 @@ time isn't SLA-backed, but security reports get priority over feature work.
 - **Privilege boundary:** every mount/unmount/pf/route action must route through the
   SMJobBless XPC helper. A code path that shells out to `sudo` directly from GUI code, or an
   XPC caller-identity check that can be spoofed, is a valid, high-priority report.
+- **Session ownership:** PF anchors, PF enable references, and VPN-bypass routes are per mount.
+  Teardown must never flush global PF state, delete a default route, or release another active
+  session's resources. Cleanup that cannot be proven stays retryable and non-green.

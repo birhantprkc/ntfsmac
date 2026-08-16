@@ -91,6 +91,23 @@ green. Concurrent rows are reconciled independently.
 The live finding and acceptance matrix are recorded in
 [`../audits/LIVE_MOUNT_STATE_AND_NFS_TRANSPORT_AUDIT_2026-08-06.md`](../audits/LIVE_MOUNT_STATE_AND_NFS_TRANSPORT_AUDIT_2026-08-06.md).
 
+### Security transaction and external unmount contract
+
+The lower-layer mount path owns a per-session PF child anchor, PF enable reference, and optional
+exact VPN-bypass route. Those resources are applied before backend NFS readiness can complete and
+are released only by their owning session. The GUI SECURITY rows remain `unknown` until the fixed
+reason-coded transaction evidence is wired into them; Hide/Show is presentation-only.
+
+App Unmount is the canonical owner-driven operation. Finder Disconnect removes only the synthetic
+NFS client mount, after which reconciliation asks the helper to complete backend/PF/route cleanup.
+Finder eject of the physical USB device is a distinct whole-device action: unmount in ntfsmac,
+wait for the detected/unmounted state, then eject the hardware.
+
+One packaged NTFS/VPN-on run passed GUI unmount, Finder Disconnect, external NFS unmount, private
+route/transport checks, and payload read-back. VPN-off, CLI-created mount discovery, restart/crash,
+physical eject/hot-unplug, and concurrent-device cells remain required. See
+[`../audits/LIVE_P0_SECURITY_TRANSACTION_AUDIT_2026-08-11.md`](../audits/LIVE_P0_SECURITY_TRANSACTION_AUDIT_2026-08-11.md).
+
 ### Read-only (dirty) state — extra
 
 | Control | Action |

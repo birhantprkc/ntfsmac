@@ -1,5 +1,11 @@
 # ntfsmac — Full Build Plan
 
+> [!IMPORTANT]
+> **Status audit (2026-08-11):** the per-session PF/route transaction, evaluated-rule readback,
+> pre-NFS VPN route repair, and targeted cleanup now run in the live helper mount path. The GUI's
+> SECURITY rows still require reason-coded transaction telemetry, and the remaining hardware
+> matrix remains release evidence rather than an inferred success.
+
 > NTFS read/write on Apple Silicon macOS, no kernel extension, no SIP modification.
 > Wraps `anylinuxfs` (libkrun microVM running ntfs-3g, exported to macOS over NFS on a
 > host-only vmnet bridge). CLI first, GUI second.
@@ -129,18 +135,22 @@ macOS host (Apple Silicon, arm64, macOS 13.0+)
 1. Resolve physical device (`diskNsM`) via `anylinuxfs list`.
 2. Request → helper over XPC. Helper **re-validates** the device name against `^disk[0-9]+s[0-9]+$`
    (it never trusts the caller).
-3. Helper starts vmnet-helper → host-only `/30` bridge (host IP + guest IP).
-4. Helper launches the libkrun microVM (libkrunfw kernel + trimmed Alpine rootfs); passes the raw
+3. Helper starts the bounded anylinuxfs mount and identifies only its newly created validated
+   vmnet-helper `/30` bridge (host IP + guest IP).
+4. Before backend NFS readiness can complete, the helper reads back one direct-child PF policy and
+   repairs only an exact VPN-captured guest route, recording both resources in per-session state.
+5. Helper launches the libkrun microVM (libkrunfw kernel + trimmed Alpine rootfs); passes the raw
    block device through.
-5. In-guest: `ntfs-3g` (default) or `ntfs3` (opt-in) mounts the device at `/mnt`; `rpc.nfsd` exports
+6. In-guest: `ntfs-3g` (default) or `ntfs3` (opt-in) mounts the device at `/mnt`; `rpc.nfsd` exports
    it; `gvproxy` bridges guest networking to vmnet.
-6. Helper runs `mount_nfs -o soft <guest-ip>:/mnt /Volumes/<label>` on the host.
-7. Finder sees a normal NFS volume.
+7. anylinuxfs runs `mount_nfs -o soft <guest-ip>:/mnt /Volumes/<label>` on the host; the helper
+   verifies the real NFS mount and matching status before reporting success.
+8. Finder sees a normal NFS volume.
 
 ### 2.3 Unmount / hot-unplug
 
-- Clean: helper unmounts `/Volumes/<label>` → stop nfsd → shut down VM → tear down bridge → stop
-  vmnet-helper.
+- Clean: helper unmounts `/Volumes/<label>` → stop nfsd → shut down VM → tear down bridge → release
+  only that session's PF token and exact owned route → stop vmnet-helper.
 - Hot-unplug: `soft` NFS times out instead of blocking the kernel → **no panic**. Poll-based
   dead-mount detection forces teardown. This is why L3 is non-negotiable.
 
@@ -162,12 +172,15 @@ UX, the helper validates for security.
 
 **XPC surface (minimal, typed — no string eval):**
 
-- `listDrives() -> [Drive]`
-- `mount(device: String, driver: {ntfs3g|ntfs3}, tuning: TuningOpts?) -> MountResult`
-- `unmount(mountID: String) -> Result`
-- `applyPfRules(bridge: BridgeInfo) -> Result` / `teardown(mountID: String) -> Result`
-- `status(mountID: String) -> StatusSnapshot`
-- `diagnose() -> DiagBundle`
+- `mount(device: String, driver: {ntfs3g|ntfs3}, mountPoint: String?, readOnly: Bool) -> Result`
+- `unmount(target: String) -> Result`
+- `teardown(mountID: String?) -> Result` for targeted or stale-session security cleanup
+- fixed-input lifecycle/install methods (`stageCLI`, `removeDependencies`, `uninstallHelper`,
+  `version`, `exitHelper`)
+
+Drive listing, mount-state snapshots, and diagnostics remain unprivileged. PF and route policy are
+measured and owned inside the root mount/unmount transaction; there is deliberately no raw
+`applyPfRules` XPC method that could load an anchor without a session owner.
 
 Every method taking a device string runs the L6 regex first, rejects + logs on fail. `tuning`
 defaults to off; enabling it is explicit and logged as risk-accepted (L8).
@@ -192,10 +205,10 @@ Produce vendored binaries from pinned sources, trimmed to NTFS/arm64 needs. Audi
 kernel image == `sources.lock` libkrunfw pin; freebsd-free build compiles clean; every artifact
 justified in `build/AUDIT.md`.
 
-### Phase 1 — pf / route hardening (deferrable, non-blocking)
+### Phase 1 — per-session pf / route hardening
 Lock the vmnet `/30` bridge so only host↔guest NFS flows; VPN-bypass safety; teardown on unmount/quit.
-**Exit:** with the anchor loaded, guest reachable only from host on NFS; anchor + routes cleanly
-removed on teardown; no residue.
+**Exit:** each session's evaluated child anchor and optional exact route are measured before NFS
+readiness; isolated teardown removes only owned resources and leaves no final-session residue.
 
 ### Phase 2 — CLI deliverables
 Installable CLI for mount/unmount wrapping vendored anylinuxfs + the helper.
@@ -369,32 +382,34 @@ sha256-checked downloads verified by checksum assertions, not unit tests).
 - **Acceptance:** `verify-vendor.bats` asserts `list` succeeds, kernel pin matches, and no quarantine
   xattr present.
 
-### Phase 1 — pf / route hardening (DEFERRABLE)
+### Phase 1 — per-session pf / route hardening
 
 #### `1-pf-rules`
 - **Deps:** `v-integration` · **Tier:** medium
 - **Files:** `cli/lib/pf-anchor.sh`, `cli/pf/ntfsmac.anchor.tmpl`, `tests/cli/pf-rules.bats`
-- **Do:** generate a pf anchor scoping NFS to the host-only `/30` subnet only (deny-by-default, allow
-  bridge); template the subnet, don't hardcode it.
+- **Do:** generate a validated-device child below the evaluated `com.apple/*` path; scope stateful
+  NFS/mountd traffic to the measured bridge and host-only `/30`; read the child rules back.
 - **Don't:** widen scope beyond the `/30`; hardcode an IP.
-- **Acceptance:** `pf-rules.bats` renders the template with a sample `/30` and asserts the emitted rules
-  match expected deny-by-default + allow-bridge scoping.
+- **Acceptance:** `pf-rules.bats` covers render/readback, evaluated-path failure, token parsing, and
+  deny-by-default plus scoped bridge rules.
 
 #### `1-vpn-bypass`
 - **Deps:** `v-integration` · **Tier:** medium
 - **Files:** `cli/lib/route-guard.sh`, `tests/cli/route-guard.bats`
-- **Do:** add a host route so bridge traffic bypasses an active VPN default route without leaking NFS
-  onto the tunnel; log the applied bypass.
-- **Don't:** modify the VPN's own routes.
-- **Acceptance:** `route-guard.bats` mocks `route`/`netstat` output and asserts the correct route command.
+- **Do:** repair at most one exact guest host route when a full or split tunnel captures it, then
+  verify it resolves through the measured bridge and record ownership.
+- **Don't:** modify a default, unrelated, or replacement route.
+- **Acceptance:** `route-guard.bats` covers add/readback, already-correct routing, malformed input,
+  split-tunnel capture, replacement ownership loss, and targeted delete.
 
 #### `1-teardown`
 - **Deps:** `1-pf-rules` · **Tier:** small
 - **Files:** `cli/lib/pf-teardown.sh`, `tests/cli/teardown.bats`
-- **Do:** remove the ntfsmac pf anchor + the VPN-bypass route; idempotent (safe if already gone).
-- **Don't:** flush pf rules outside the `ntfsmac` anchor.
-- **Acceptance:** `teardown.bats` asserts `pfctl -a ntfsmac -F` + route-delete calls and exit 0 even
-  when nothing to remove.
+- **Do:** reconcile root-owned per-device state and release only that session's child anchor, PF
+  token, and exact route; preserve unproven cleanup for retry.
+- **Don't:** flush global PF state, delete a default route, or touch another active session.
+- **Acceptance:** `teardown.bats` covers idempotence, isolated concurrent teardown, stale sessions,
+  unknown runtime state, unsafe records, and cleanup-pending behavior.
 
 ### Phase 2 — CLI
 
@@ -484,7 +499,8 @@ sha256-checked downloads verified by checksum assertions, not unit tests).
 - **Deps:** GATE-CLI-BEFORE-GUI · **Tier:** large
 - **Files:** `helper/main.swift`, `helper/HelperProtocol.swift`, `helper/Info.plist`,
   `helper/launchd.plist`, `gui/Helper/HelperClient.swift`, `helper/Tests/HelperTests.swift`
-- **Do:** expose XPC methods (mount, unmount, applyPfRules, teardown) per §3; re-validate device with
+- **Do:** expose the minimal mount, unmount, targeted teardown, and lifecycle methods per §3; keep
+  PF/route ownership inside mount/unmount; re-validate device with
   `^disk[0-9]+s[0-9]+$` **inside the helper**; pin the helper↔client relationship via code-sign
   requirement (ad-hoc); reject unsigned/mismatched callers.
 - **Don't:** shell out with `sudo` from the UI; skip in-helper validation (L5, L6). Any deviation from
@@ -638,7 +654,7 @@ stray debug output; **keep** real business-logic and security tests.
 | R5 | Dependency bloat / building unneeded FreeBSD & fs tooling | Med | Mandatory `v-audit`; settled cuts; justify every artifact in `AUDIT.md`; verify transitive deps before cutting (blkid stays). |
 | R6 | Dirty NTFS mounted r/w → corruption | High | Detect dirty flag; default RO + explicit warning (prototype RO/dirty state); user opts into rw knowingly. |
 | R7 | Speed tuning corrupts on unstable link | Med | `async` export (the data-loss lever) stays off/absent. `rsize`/`wsize`/`readahead` defaulted on via L8 owner override — no integrity surface, so no corruption risk on unstable link. |
-| R8 | vmnet bridge leaks to other interfaces | Med | Phase 1 pf anchor scopes to the `/30`; route cleanup on teardown. Flag if deferred. |
+| R8 | vmnet bridge leaks to other interfaces | Med | Per-session child anchor scopes to the measured bridge and `/30`; exact-route ownership and readback fail closed. |
 | R9 | SMJobBless legacy on 13+ | Med | Keep SMJobBless per CLAUDE.md; isolate behind one Swift module; `SMAppService` swap is a maintainer decision. |
 | R10 | GUI drifts from locked design | Low | Already-built screens are source of truth (`ui/prototype.html` removed 2026-07-13); no redesign. |
 

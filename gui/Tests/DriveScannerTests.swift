@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import HelperShared
 @testable import NtfsmacGUI
@@ -197,6 +198,91 @@ private let sampleExtOutput = """
     #expect(runner.calls.count == 1)
     #expect(runner.calls[0].path == "/stub/anylinuxfs")
     #expect(runner.calls[0].args == ["list"])
+}
+
+@MainActor
+@Test func productionDriveScanDoesNotBlockMainActor() async throws {
+    let tempDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: tempDirectory,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+    let probeStarted = tempDirectory.appendingPathComponent("probe-started")
+    let releaseProbe = tempDirectory.appendingPathComponent("release-probe")
+    let slowList = tempDirectory.appendingPathComponent("slow-list")
+    try """
+    #!/bin/sh
+    : > "\(probeStarted.path)"
+    while [ ! -e "\(releaseProbe.path)" ]; do
+      sleep 0.01
+    done
+    exit 0
+    """.write(
+        to: slowList,
+        atomically: true,
+        encoding: .utf8
+    )
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: slowList.path
+    )
+
+    let scanner = DriveScanner(anylinuxfsPath: slowList.path, scanTimeout: 2)
+    let scanTask = Task { await scanner.refresh() }
+
+    // Wait outside the main actor until the child is running. The child cannot exit until this
+    // test resumes on the main actor and writes the release marker. A synchronous production
+    // scan would therefore hit DriveScanner's real timeout and fail the assertion below, without
+    // relying on a wall-clock scheduling threshold that becomes flaky on a busy CI runner.
+    let startedWhileMainActorWasAvailable = await Task.detached {
+        for _ in 0..<200 {
+            if FileManager.default.fileExists(atPath: probeStarted.path) {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return false
+    }.value
+    #expect(startedWhileMainActorWasAvailable, "the list probe did not start")
+    try Data().write(to: releaseProbe)
+
+    await scanTask.value
+    #expect(scanner.lastError == nil, "the list probe blocked the main actor until timeout")
+}
+
+@MainActor
+@Test func productionDriveScanTerminatesAStalledProbe() async throws {
+    let tempDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: tempDirectory,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+    let stalledList = tempDirectory.appendingPathComponent("stalled-list")
+    try "#!/bin/sh\nwhile :; do :; done\n".write(
+        to: stalledList,
+        atomically: true,
+        encoding: .utf8
+    )
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: stalledList.path
+    )
+
+    let scanner = DriveScanner(anylinuxfsPath: stalledList.path, scanTimeout: 0.05)
+    let clock = ContinuousClock()
+    let startedAt = clock.now
+
+    await scanner.refresh()
+
+    #expect(startedAt.duration(to: clock.now) < .seconds(1))
+    #expect(scanner.drives.isEmpty)
+    #expect(scanner.lastError?.contains("timed out") == true)
 }
 
 private struct ListCall: Equatable {

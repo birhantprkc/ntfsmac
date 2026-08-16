@@ -34,6 +34,9 @@ are already built into the vendored kernel image.
 - **Authoritative mount state and transport diagnostics** — the GUI reconciles anylinuxfs session
   evidence with the host NFS mount table, while diagnostics fail closed unless an active ntfsmac
   mount uses the expected private vmnet path and effective `soft` NFS parameters.
+- **Per-session network security** — each mount owns its evaluated PF child anchor, PF enable
+  reference, and only the exact VPN-bypass host route it needs; teardown never flushes global PF
+  state or removes another session's route.
 
 ## Requirements
 
@@ -212,6 +215,12 @@ plan: [docs/dev/PLAN.md](docs/dev/PLAN.md).
 anylinuxfs status with the macOS NFS mount table on launch, popover open, Refresh, after helper
 completion, and on a bounded poll. Missing or contradictory evidence remains recoverable but is
 shown as warning/unknown rather than green.
+
+The privileged mount transaction measures the newly created private `/30`, installs and reads back
+a direct child of the evaluated macOS `com.apple/*` PF path, acquires one PF enable reference, and
+repairs only an exact VPN-captured guest route before the backend NFS readiness check can complete.
+State is root-owned and per device; unmount and stale-session recovery release only resources whose
+ownership can still be proven.
 
 ## Signing & distribution
 

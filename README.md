@@ -31,6 +31,9 @@ are already built into the vendored kernel image.
   exposing local paths or network identity.
 - **Reproducible first-run environment** — the runtime pulls an immutable Alpine arm64 digest,
   keeps versioned caches side by side, and packaging rejects floating image references.
+- **Authoritative mount state and transport diagnostics** — the GUI reconciles anylinuxfs session
+  evidence with the host NFS mount table, while diagnostics fail closed unless an active ntfsmac
+  mount uses the expected private vmnet path and effective `soft` NFS parameters.
 
 ## Requirements
 
@@ -93,6 +96,8 @@ What each line means:
 | `Alpine runtime: <state>` | Reports the approved tag/digest and whether the matching versioned cache is complete, missing, legacy, interrupted, or mismatched; Diagnose never downloads or deletes a cache. |
 | `guest ntfs-3g` / `guest nfs-utils` | Reports fixed package-version tokens read from the selected guest cache, or `not installed` / `unavailable` without exposing local paths. |
 | `vmnet bridge: down` | Expected when nothing is mounted; it should read `up` while a volume is mounted. If it stays `down` during a mount, approve the vmnet-helper permission prompt and retry. |
+| `active network helper: <state>` | Uses fixed privacy-safe tokens to distinguish `vmnet`, `gvproxy`, mixed, missing, or unavailable evidence. |
+| `NFS transport contract: <state>` | Active ntfsmac mounts are healthy only when they resolve inside the private vmnet pool, route through a bridge, use effective `soft` parameters, and have no loopback NFS listener. |
 | `VPN default route: detected` | A tunnel owns the default route. This is informational; the report does not record which VPN/interface or any address/route details. |
 | `current NFS mount count: N` | Number of active NFS mounts, without their names or paths. |
 | `overall: degraded` | One of the fatal checks above failed — fix that line first. |
@@ -202,6 +207,11 @@ macOS ── NFS (soft mount) ──> vmnet host-only bridge ──> libkrun mic
 Every control that mounts, unmounts, or touches `pf`/route state goes through a SMJobBless
 XPC helper — the GUI never shell-outs to `sudo` directly. Full architecture and phased build
 plan: [docs/dev/PLAN.md](docs/dev/PLAN.md).
+
+`MountController.mountedDrives` is a presentation cache, not proof of a mount. The GUI pairs
+anylinuxfs status with the macOS NFS mount table on launch, popover open, Refresh, after helper
+completion, and on a bounded poll. Missing or contradictory evidence remains recoverable but is
+shown as warning/unknown rather than green.
 
 ## Signing & distribution
 

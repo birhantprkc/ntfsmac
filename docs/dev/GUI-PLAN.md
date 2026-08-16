@@ -76,6 +76,21 @@ mounting, mounted, warning, and error states.
 | SECURITY `Hide` / `Show` | Collapse or restore only the measured security rows | Mounted |
 | ⚙ / `Quit` | As above | Always |
 
+### Mount-state truth contract
+
+The GUI and CLI control one real host mount state. The macOS NFS mount table plus ntfsmac-owned
+anylinuxfs session evidence are authoritative; `MountController.mountedDrives` is only a
+presentation cache.
+
+The app reconciles those sources on launch, popover open, every five seconds, Refresh, and after
+helper completion. It discovers CLI-created mounts, removes externally unmounted rows, and verifies
+the effective read-only/read-write state per mount point. If evidence is incomplete or disagrees,
+the row keeps recovery controls but becomes warning/unknown; the header and icon must never stay
+green. Concurrent rows are reconciled independently.
+
+The live finding and acceptance matrix are recorded in
+[`../audits/LIVE_MOUNT_STATE_AND_NFS_TRANSPORT_AUDIT_2026-08-06.md`](../audits/LIVE_MOUNT_STATE_AND_NFS_TRANSPORT_AUDIT_2026-08-06.md).
+
 ### Read-only (dirty) state — extra
 
 | Control | Action |

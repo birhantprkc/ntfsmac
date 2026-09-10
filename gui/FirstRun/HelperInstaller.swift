@@ -55,7 +55,44 @@ public struct RealQuarantineStripper: QuarantineStripping {
 }
 
 public struct RealHelperInstallService: HelperInstallService {
-    public init() {}
+    private let authorizationCreate: @Sendable () -> (OSStatus, AuthorizationRef?)
+    private let authorizationFree: @Sendable (AuthorizationRef) -> Void
+    private let jobBless: @Sendable (CFString, CFString, AuthorizationRef?, UnsafeMutablePointer<Unmanaged<CFError>?>?) -> Bool
+    private let jobCopyDictionary: @Sendable (CFString, CFString) -> CFDictionary?
+    private let verificationPollDelayNanoseconds: UInt64
+    private let verificationMaxAttempts: Int
+
+    public init(
+        authorizationCreate: @escaping @Sendable () -> (OSStatus, AuthorizationRef?) = {
+            var authRef: AuthorizationRef?
+            let status = kSMRightBlessPrivilegedHelper.withCString { namePtr -> OSStatus in
+                var authItem = AuthorizationItem(name: namePtr, valueLength: 0, value: nil, flags: 0)
+                return withUnsafeMutablePointer(to: &authItem) { itemPtr -> OSStatus in
+                    var rights = AuthorizationRights(count: 1, items: itemPtr)
+                    let flags: AuthorizationFlags = [.interactionAllowed, .extendRights, .preAuthorize]
+                    return AuthorizationCreate(&rights, nil, flags, &authRef)
+                }
+            }
+            return (status, authRef)
+        },
+        authorizationFree: @escaping @Sendable (AuthorizationRef) -> Void = { authRef in
+            AuthorizationFree(authRef, [.destroyRights])
+        },
+        jobBless: @escaping @Sendable (CFString, CFString, AuthorizationRef?, UnsafeMutablePointer<Unmanaged<CFError>?>?) -> Bool = { domain, label, auth, error in
+            guard let auth else { return false }
+            return SMJobBless(domain, label, auth, error)
+        },
+        jobCopyDictionary: @escaping @Sendable (CFString, CFString) -> CFDictionary? = { SMJobCopyDictionary($0, $1)?.takeRetainedValue() },
+        verificationPollDelayNanoseconds: UInt64 = 100_000_000,
+        verificationMaxAttempts: Int = 10
+    ) {
+        self.authorizationCreate = authorizationCreate
+        self.authorizationFree = authorizationFree
+        self.jobBless = jobBless
+        self.jobCopyDictionary = jobCopyDictionary
+        self.verificationPollDelayNanoseconds = verificationPollDelayNanoseconds
+        self.verificationMaxAttempts = verificationMaxAttempts
+    }
 
     /// `SMJobCopyDictionary` is the documented, real way to check whether a `SMJobBless`-style
     /// launchd job is already registered — deliberately not `SMAppService.status` (that's the
@@ -70,25 +107,12 @@ public struct RealHelperInstallService: HelperInstallService {
     /// matches this app's expected identifier. There's no stronger check realistically
     /// available without a paid-cert trust chain (L4).
     public func isInstalled(label: String) -> Bool {
-        SMJobCopyDictionary(kSMDomainSystemLaunchd, label as CFString) != nil
+        jobCopyDictionary(kSMDomainSystemLaunchd, label as CFString) != nil
     }
 
     public func bless(label: String) -> HelperInstallOutcome {
-        var authRef: AuthorizationRef?
-        // `kSMRightBlessPrivilegedHelper.withCString` keeps the C string alive for exactly the
-        // duration of `AuthorizationCreate` — not relying on `(kSMRightBlessPrivilegedHelper as
-        // NSString).utf8String`'s pointer surviving past the bridging expression, which the
-        // API contract never actually guarantees.
-        let status = kSMRightBlessPrivilegedHelper.withCString { namePtr -> OSStatus in
-            var authItem = AuthorizationItem(name: namePtr, valueLength: 0, value: nil, flags: 0)
-            return withUnsafeMutablePointer(to: &authItem) { itemPtr -> OSStatus in
-                var rights = AuthorizationRights(count: 1, items: itemPtr)
-                let flags: AuthorizationFlags = [.interactionAllowed, .extendRights, .preAuthorize]
-                return AuthorizationCreate(&rights, nil, flags, &authRef)
-            }
-        }
-
-        guard status == errAuthorizationSuccess, let authRef else {
+        let (status, authRef) = authorizationCreate()
+        guard status == errAuthorizationSuccess else {
             switch status {
             case errAuthorizationCanceled:
                 return .denied("Authorization was cancelled.")
@@ -98,15 +122,36 @@ public struct RealHelperInstallService: HelperInstallService {
                 return .failed("Authorization request failed (status \(status)).")
             }
         }
-        defer { AuthorizationFree(authRef, [.destroyRights]) }
+        if let authRef {
+            defer { authorizationFree(authRef) }
+        }
 
         var cfError: Unmanaged<CFError>?
-        guard SMJobBless(kSMDomainSystemLaunchd, label as CFString, authRef, &cfError) else {
+        guard jobBless(kSMDomainSystemLaunchd, label as CFString, authRef, &cfError) else {
             if let cfError {
                 return .failed((cfError.takeRetainedValue() as Error).localizedDescription)
             }
             return .failed("SMJobBless failed for an unknown reason.")
         }
+
+        // Post-bless verification: SMJobBless copies files, but launchd will reject loading the
+        // job if it has been marked disabled (e.g. via launchctl or System Settings > Login Items).
+        // Poll briefly for launchd registration before reporting success.
+        var registered = false
+        for _ in 0..<verificationMaxAttempts {
+            if isInstalled(label: label) {
+                registered = true
+                break
+            }
+            if verificationPollDelayNanoseconds > 0 {
+                Thread.sleep(forTimeInterval: Double(verificationPollDelayNanoseconds) / 1_000_000_000.0)
+            }
+        }
+
+        guard registered else {
+            return .failed("Helper was installed, but launchd refused to register the service (it may be disabled in System Settings ▸ General ▸ Login Items & Extensions, or disabled via launchctl).")
+        }
+
         return .installed
     }
 }

@@ -117,18 +117,25 @@ STUB
   [[ "$output" == *"not running as root"* ]]
 }
 
-@test "as root: removes the privileged helper's launchd plist and binary" {
+@test "as root: removes the privileged helper's launchd plist and binary and unsets disabled state" {
   mkdir -p "$(dirname "$NTFSMAC_HELPER_PLIST")" "$(dirname "$NTFSMAC_HELPER_BIN")"
   touch "$NTFSMAC_HELPER_PLIST" "$NTFSMAC_HELPER_BIN"
   cat > "$STUB_DIR/id" <<'STUB'
 #!/bin/bash
 echo 0
 STUB
-  chmod +x "$STUB_DIR/id"
+  cat > "$STUB_DIR/launchctl" <<STUB
+#!/bin/bash
+echo "launchctl: \$*" >> "$SCRATCH/launchctl.log"
+exit 0
+STUB
+  chmod +x "$STUB_DIR/id" "$STUB_DIR/launchctl"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   [ ! -f "$NTFSMAC_HELPER_PLIST" ]
   [ ! -f "$NTFSMAC_HELPER_BIN" ]
+  run cat "$SCRATCH/launchctl.log"
+  [[ "$output" == *"enable system/com.khr898.ntfsmac.helper"* ]]
 }
 
 @test "self-elevates via sudo when not root, so the privileged helper actually gets removed" {

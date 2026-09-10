@@ -309,3 +309,37 @@ private final class BlockingInstallService: HelperInstallService, @unchecked Sen
     #expect(blocking.blessCallCount == 1)
     #expect(installer.state == .installed)
 }
+
+@MainActor
+@Test func realHelperInstallServiceFailsWhenBlessSucceedsButLaunchdDoesNotRegisterService() {
+    let service = RealHelperInstallService(
+        authorizationCreate: { (errAuthorizationSuccess, nil) },
+        authorizationFree: { _ in },
+        jobBless: { _, _, _, _ in true },
+        jobCopyDictionary: { _, _ in nil },
+        verificationPollDelayNanoseconds: 0,
+        verificationMaxAttempts: 1
+    )
+    let outcome = service.bless(label: "com.khr898.ntfsmac.helper")
+    guard case .failed(let message) = outcome else {
+        Issue.record("Expected .failed outcome when launchd does not register the service, got \(outcome)")
+        return
+    }
+    #expect(message.contains("launchd refused to register the service"))
+    #expect(message.contains("System Settings"))
+}
+
+@MainActor
+@Test func realHelperInstallServiceSucceedsWhenBlessSucceedsAndLaunchdRegistersService() {
+    let service = RealHelperInstallService(
+        authorizationCreate: { (errAuthorizationSuccess, nil) },
+        authorizationFree: { _ in },
+        jobBless: { _, _, _, _ in true },
+        jobCopyDictionary: { _, _ in [:] as CFDictionary },
+        verificationPollDelayNanoseconds: 0,
+        verificationMaxAttempts: 1
+    )
+    let outcome = service.bless(label: "com.khr898.ntfsmac.helper")
+    #expect(outcome == .installed)
+}
+

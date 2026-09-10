@@ -254,3 +254,34 @@ func bridgeDownUsesMountContext(argument: (MountState, DiagnoseStatus, String)) 
     #expect(fake.calls.count == 2)
     #expect(runner.report == firstReport)
 }
+
+@Test func diagnoseReportDecodesHelperStatusAndProducesCorrectRow() throws {
+    let json = """
+    {
+      "diagnostic_schema": 5,
+      "healthy": false,
+      "ntfsmac_version": "2.3",
+      "build_version": "040926",
+      "macos_version": "26.6.2",
+      "architecture": "arm64",
+      "helper_installed": false,
+      "helper_status": "disabled",
+      "missing_binaries": 0,
+      "missing_components": [],
+      "quarantined_binaries": 0,
+      "quarantined_components": [],
+      "kernel_pin": "match",
+      "bridge": "up"
+    }
+    """
+    let report = try JSONDecoder().decode(DiagnoseReport.self, from: Data(json.utf8))
+    #expect(report.helperStatus == "disabled")
+    #expect(report.helperInstalled == false)
+
+    let rows = DiagnoseSummary.rows(for: report)
+    let helperRow = rows.first { $0.id == "helper" }
+    #expect(helperRow != nil)
+    #expect(helperRow?.value == "Disabled in launchd")
+    #expect(helperRow?.status == .warning)
+    #expect(helperRow?.explanation.contains("System Settings") == true)
+}

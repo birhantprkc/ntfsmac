@@ -138,6 +138,7 @@ remove_privileged_helper_if_root() {
   rm -f "$bin"
   tccutil reset SystemPolicyAllFiles com.khr898.ntfsmac.helper >/dev/null 2>&1 || true
   tccutil reset All com.khr898.ntfsmac.helper >/dev/null 2>&1 || true
+  launchctl enable system/com.khr898.ntfsmac.helper >/dev/null 2>&1 || true
   echo "uninstall: removed privileged helper (ran as root)"
 }
 

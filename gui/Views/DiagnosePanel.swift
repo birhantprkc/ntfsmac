@@ -108,7 +108,9 @@ public enum DiagnoseSummary {
             rows.append(transport)
         }
         if let helperInstalled = report.helperInstalled {
-            rows.append(helperRow(installed: helperInstalled))
+            rows.append(helperRow(installed: helperInstalled, status: report.helperStatus))
+        } else if let helperStatus = report.helperStatus {
+            rows.append(helperRow(installed: false, status: helperStatus))
         }
         if let vpnDefaultRoute = report.vpnDefaultRoute {
             rows.append(vpnRow(detected: vpnDefaultRoute))
@@ -388,8 +390,25 @@ public enum DiagnoseSummary {
         }
     }
 
-    private static func helperRow(installed: Bool) -> DiagnoseSummaryRow {
-        .init(
+    private static func helperRow(installed: Bool, status: String? = nil) -> DiagnoseSummaryRow {
+        if status == "disabled" {
+            return .init(
+                id: "helper",
+                label: "Privileged helper",
+                value: "Disabled in launchd",
+                status: .warning,
+                explanation: "The helper is disabled in launchd. Enable it in System Settings ▸ General ▸ Login Items & Extensions (Allow in the Background) or run: sudo launchctl enable system/com.khr898.ntfsmac.helper"
+            )
+        } else if status == "unregistered" {
+            return .init(
+                id: "helper",
+                label: "Privileged helper",
+                value: "Not registered in launchd",
+                status: .warning,
+                explanation: "The helper files exist but the daemon is not registered. Reinstall via Preferences ▸ Reinstall privileged helper."
+            )
+        }
+        return .init(
             id: "helper",
             label: "Privileged helper",
             value: installed ? "Installed" : "Not installed",

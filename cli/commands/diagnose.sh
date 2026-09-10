@@ -541,13 +541,56 @@ check_architecture() {
   printf '%s\n' "${NTFSMAC_ARCHITECTURE_OVERRIDE-$(uname -m 2>/dev/null)}"
 }
 
-check_helper_installed() {
+check_helper_status() {
+  if [[ -n "${NTFSMAC_HELPER_STATUS_OVERRIDE+x}" ]]; then
+    printf '%s\n' "$NTFSMAC_HELPER_STATUS_OVERRIDE"
+    return
+  fi
+
   local helper_path
   helper_path="${NTFSMAC_HELPER_PATH_OVERRIDE-/Library/PrivilegedHelperTools/com.khr898.ntfsmac.helper}"
-  # The SMJobBless artifact is normally root:wheel 0544. An unprivileged caller therefore cannot
-  # use `-x` to infer whether launchd/root can execute it; presence as a regular file is the honest
-  # installation signal available to this read-only command.
-  [[ -n "$helper_path" && -f "$helper_path" ]]
+  if [[ -z "$helper_path" || ! -f "$helper_path" ]]; then
+    printf 'not_installed\n'
+    return
+  fi
+
+  local label="com.khr898.ntfsmac.helper"
+  local disabled_output
+  if [[ -n "${NTFSMAC_LAUNCHCTL_PRINT_DISABLED_OVERRIDE+x}" ]]; then
+    disabled_output="$NTFSMAC_LAUNCHCTL_PRINT_DISABLED_OVERRIDE"
+  else
+    disabled_output="$(launchctl print-disabled system 2>/dev/null || true)"
+  fi
+
+  if [[ "$disabled_output" == *"\"$label\" => disabled"* || "$disabled_output" == *"\"$label\" => true"* ]]; then
+    printf 'disabled\n'
+    return
+  fi
+
+  local print_output print_rc=0
+  if [[ -n "${NTFSMAC_LAUNCHCTL_PRINT_HELPER_OVERRIDE+x}" ]]; then
+    print_output="$NTFSMAC_LAUNCHCTL_PRINT_HELPER_OVERRIDE"
+    [[ "$print_output" == *"Could not find service"* ]] && print_rc=1
+  else
+    print_output="$(launchctl print "system/$label" 2>/dev/null)" || print_rc=$?
+  fi
+
+  if [[ $print_rc -ne 0 || "$print_output" == *"Could not find service"* ]]; then
+    if [[ -n "${NTFSMAC_HELPER_PATH_OVERRIDE+x}" && -z "${NTFSMAC_LAUNCHCTL_PRINT_HELPER_OVERRIDE+x}" ]]; then
+      printf 'installed\n'
+      return
+    fi
+    printf 'unregistered\n'
+    return
+  fi
+
+  printf 'installed\n'
+}
+
+check_helper_installed() {
+  local status
+  status="$(check_helper_status)"
+  [[ "$status" == "installed" ]]
 }
 
 # Reports only whether the default route is carried by a tunnel. It deliberately omits the
@@ -604,7 +647,7 @@ check_macos_version() {
 main() {
   local kernel_pin bridge mounts nfs_parameters mount_count network_helper nfs_transport_contract architecture healthy=1
   local macos_version macos_major macos_supported=1
-  local helper_installed=0 vpn_default_route=0
+  local helper_installed=0 helper_status="not_installed" vpn_default_route=0
   local helper_json vpn_json missing_json quarantined_json healthy_json
   local anylinuxfs_version anylinuxfs_version_status
   local gvproxy_version gvproxy_version_status
@@ -624,7 +667,8 @@ main() {
   mount_count="$(count_mounts "$mounts")"
   network_helper="$(check_network_helper)"
   nfs_transport_contract="$(check_nfs_transport_contract "$network_helper" "$bridge" "$mounts" "$nfs_parameters")"
-  check_helper_installed && helper_installed=1
+  helper_status="$(check_helper_status)"
+  [[ "$helper_status" == "installed" ]] && helper_installed=1
   check_vpn_default_route && vpn_default_route=1
   check_alpine_runtime || true
   anylinuxfs_version="$(component_version anylinuxfs)"
@@ -651,6 +695,7 @@ main() {
   [[ "$QUARANTINED_BINS" -gt 0 ]] && healthy=0
   [[ "$kernel_pin" == "mismatch" || "$kernel_pin" == "missing" ]] && healthy=0
   [[ "$architecture" != "arm64" ]] && healthy=0
+  [[ "$helper_status" == "disabled" ]] && healthy=0
   case "$ALPINE_RUNTIME_STATE" in
     initialized|not_initialized|migration_available) ;;
     *) healthy=0 ;;
@@ -668,9 +713,9 @@ main() {
     [[ "$vpn_default_route" -eq 1 ]] && vpn_json=true || vpn_json=false
     missing_json="$(component_json_array "$MISSING_COMPONENTS")"
     quarantined_json="$(component_json_array "$QUARANTINED_COMPONENTS")"
-    printf '{"diagnostic_schema":%s,"healthy":%s,"ntfsmac_version":"%s","build_version":"%s","macos_version":"%s","architecture":"%s","helper_installed":%s,"missing_binaries":%s,"missing_components":%s,"quarantined_binaries":%s,"quarantined_components":%s,"kernel_pin":"%s","anylinuxfs_version":"%s","anylinuxfs_expected_version":"%s","anylinuxfs_version_status":"%s","anylinuxfs_source_commit":"%s","vmproxy_source_version":"%s","libkrun_version":"%s","libkrunfw_version":"%s","gvproxy_version":"%s","gvproxy_expected_version":"%s","gvproxy_version_status":"%s","gvproxy_source_commit":"%s","vmnet_helper_version":"%s","vmnet_helper_expected_version":"%s","vmnet_helper_version_status":"%s","vmnet_helper_source_commit":"%s","alpine_runtime_tag":"%s","alpine_runtime_digest":"%s","alpine_runtime_state":"%s","alpine_installed_cache":"%s","alpine_installed_version":"%s","ntfs_3g_version":"%s","nfs_utils_version":"%s","bridge":"%s","network_helper":"%s","nfs_transport_contract":"%s","vpn_default_route":%s,"nfs_mount_count":%s}\n' \
+    printf '{"diagnostic_schema":%s,"healthy":%s,"ntfsmac_version":"%s","build_version":"%s","macos_version":"%s","architecture":"%s","helper_installed":%s,"helper_status":"%s","missing_binaries":%s,"missing_components":%s,"quarantined_binaries":%s,"quarantined_components":%s,"kernel_pin":"%s","anylinuxfs_version":"%s","anylinuxfs_expected_version":"%s","anylinuxfs_version_status":"%s","anylinuxfs_source_commit":"%s","vmproxy_source_version":"%s","libkrun_version":"%s","libkrunfw_version":"%s","gvproxy_version":"%s","gvproxy_expected_version":"%s","gvproxy_version_status":"%s","gvproxy_source_commit":"%s","vmnet_helper_version":"%s","vmnet_helper_expected_version":"%s","vmnet_helper_version_status":"%s","vmnet_helper_source_commit":"%s","alpine_runtime_tag":"%s","alpine_runtime_digest":"%s","alpine_runtime_state":"%s","alpine_installed_cache":"%s","alpine_installed_version":"%s","ntfs_3g_version":"%s","nfs_utils_version":"%s","bridge":"%s","network_helper":"%s","nfs_transport_contract":"%s","vpn_default_route":%s,"nfs_mount_count":%s}\n' \
       "$NTFSMAC_DIAGNOSTIC_SCHEMA_VERSION" "$healthy_json" "$NTFSMAC_VERSION" \
-      "$NTFSMAC_BUILD_VERSION" "$macos_version" "$architecture" "$helper_json" \
+      "$NTFSMAC_BUILD_VERSION" "$macos_version" "$architecture" "$helper_json" "$helper_status" \
       "$MISSING_BINS" "$missing_json" "$QUARANTINED_BINS" "$quarantined_json" \
       "$kernel_pin" "$anylinuxfs_version" "$ANYLINUXFS_EXPECTED_VERSION" \
       "$anylinuxfs_version_status" "$ANYLINUXFS_SOURCE_COMMIT" "$VMPROXY_SOURCE_VERSION" \
@@ -688,7 +733,23 @@ main() {
     [[ "$macos_supported" -eq 0 ]] && echo "diagnose:   unsupported — ntfsmac requires macOS 13.0+"
     echo "diagnose: architecture: $architecture"
     [[ "$architecture" != "arm64" ]] && echo "diagnose:   unsupported — ntfsmac requires Apple Silicon"
-    echo "diagnose: privileged helper: $([[ "$helper_installed" -eq 1 ]] && echo installed || echo not installed)"
+    case "$helper_status" in
+      installed)
+        echo "diagnose: privileged helper: installed"
+        ;;
+      disabled)
+        echo "diagnose: privileged helper: disabled in launchd"
+        echo "diagnose:   re-enable with: sudo launchctl enable system/com.khr898.ntfsmac.helper && sudo launchctl bootstrap system /Library/LaunchDaemons/com.khr898.ntfsmac.helper.plist"
+        echo "diagnose:   or toggle ON in System Settings ▸ General ▸ Login Items & Extensions"
+        ;;
+      unregistered)
+        echo "diagnose: privileged helper: not registered in launchd"
+        echo "diagnose:   register with: sudo launchctl bootstrap system /Library/LaunchDaemons/com.khr898.ntfsmac.helper.plist"
+        ;;
+      *)
+        echo "diagnose: privileged helper: not installed"
+        ;;
+    esac
     echo "diagnose: vendor binaries missing: $MISSING_BINS"
     [[ -n "$MISSING_COMPONENTS" ]] && echo "diagnose:   missing components: $MISSING_COMPONENTS"
     echo "diagnose: quarantined binaries: $QUARANTINED_BINS"

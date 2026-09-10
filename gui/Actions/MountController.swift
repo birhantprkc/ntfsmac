@@ -448,13 +448,20 @@ public final class MountController: ObservableObject {
         case HelperClientError.invalidUnmountTarget(let target):
             return "Invalid unmount target: \(target)"
         case HelperClientError.helper(let message):
+            if message.contains("Couldn't communicate with a helper application") {
+                return "Couldn't communicate with the privileged helper. The background service is not running or may be disabled in System Settings ▸ General ▸ Login Items & Extensions (Allow in the Background). Run 'ntfsmac diagnose' for details."
+            }
             return message
         case HelperClientError.decode:
             return "Helper returned an unreadable response"
         case HelperClientError.proxyUnavailable:
             return "Privileged helper is not installed or not responding"
         default:
-            return error.localizedDescription
+            let desc = error.localizedDescription
+            if desc.contains("Couldn't communicate with a helper application") {
+                return "Couldn't communicate with the privileged helper. The background service is not running or may be disabled in System Settings ▸ General ▸ Login Items & Extensions (Allow in the Background). Run 'ntfsmac diagnose' for details."
+            }
+            return desc
         }
     }
 }

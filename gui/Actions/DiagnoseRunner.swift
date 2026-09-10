@@ -12,6 +12,7 @@ public struct DiagnoseReport: Codable, Equatable, Sendable {
     public let macosVersion: String?
     public let architecture: String?
     public let helperInstalled: Bool?
+    public let helperStatus: String?
     public let missingBinaries: Int
     public let missingComponents: [String]?
     public let quarantinedBinaries: Int
@@ -53,6 +54,7 @@ public struct DiagnoseReport: Codable, Equatable, Sendable {
         case macosVersion = "macos_version"
         case architecture
         case helperInstalled = "helper_installed"
+        case helperStatus = "helper_status"
         case missingBinaries = "missing_binaries"
         case missingComponents = "missing_components"
         case quarantinedBinaries = "quarantined_binaries"
@@ -106,6 +108,7 @@ public struct DiagnoseReport: Codable, Equatable, Sendable {
             macosVersion: nil,
             architecture: nil,
             helperInstalled: nil,
+            helperStatus: nil,
             missingComponents: nil,
             quarantinedComponents: nil,
             networkHelper: nil,
@@ -149,6 +152,7 @@ public struct DiagnoseReport: Codable, Equatable, Sendable {
         macosVersion: String?,
         architecture: String?,
         helperInstalled: Bool?,
+        helperStatus: String? = nil,
         missingComponents: [String]?,
         quarantinedComponents: [String]?,
         networkHelper: String? = nil,
@@ -185,6 +189,7 @@ public struct DiagnoseReport: Codable, Equatable, Sendable {
         self.macosVersion = macosVersion
         self.architecture = architecture
         self.helperInstalled = helperInstalled
+        self.helperStatus = helperStatus
         self.missingBinaries = missingBinaries
         self.missingComponents = missingComponents
         self.quarantinedBinaries = quarantinedBinaries

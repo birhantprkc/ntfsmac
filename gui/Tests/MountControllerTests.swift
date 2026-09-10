@@ -263,3 +263,11 @@ private struct FakeReadOnlyChecker: MountReadOnlyChecking {
     #expect(controller.mountedDriveIDs.isEmpty)
     #expect(appState.state == .idle)
 }
+
+@MainActor
+@Test func describeTranslatesHelperCannotConnectToLaunchdGuidance() {
+    let rawError = HelperClientError.helper("Couldn't communicate with a helper application.")
+    let description = MountController.describe(rawError)
+    #expect(description.contains("System Settings"))
+    #expect(description.contains("ntfsmac diagnose"))
+}

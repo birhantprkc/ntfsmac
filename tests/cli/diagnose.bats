@@ -412,6 +412,33 @@ nas.example:/share on /Volumes/Share (nfs, nodev, nosuid)"
   [[ "$output" == *'"helper_installed":true'* ]]
 }
 
+@test "privileged helper disabled in launchd is reported as disabled with recovery instructions" {
+  export NTFSMAC_LAUNCHCTL_PRINT_DISABLED_OVERRIDE='"com.khr898.ntfsmac.helper" => disabled'
+  run "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"privileged helper: disabled in launchd"* ]]
+  [[ "$output" == *"re-enable with: sudo launchctl enable system/com.khr898.ntfsmac.helper"* ]]
+  [[ "$output" == *"overall: degraded"* ]]
+
+  run "$SCRIPT" --json
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'"helper_installed":false'* ]]
+  [[ "$output" == *'"helper_status":"disabled"'* ]]
+  [[ "$output" == *'"healthy":false'* ]]
+}
+
+@test "privileged helper unregistered in launchd is reported as unregistered with bootstrap instructions" {
+  export NTFSMAC_LAUNCHCTL_PRINT_DISABLED_OVERRIDE=""
+  export NTFSMAC_LAUNCHCTL_PRINT_HELPER_OVERRIDE="Could not find service in domain for system"
+  run "$SCRIPT"
+  [[ "$output" == *"privileged helper: not registered in launchd"* ]]
+  [[ "$output" == *"register with: sudo launchctl bootstrap system"* ]]
+
+  run "$SCRIPT" --json
+  [[ "$output" == *'"helper_installed":false'* ]]
+  [[ "$output" == *'"helper_status":"unregistered"'* ]]
+}
+
 @test "degraded: macOS older than 13.0 is unsupported" {
   export NTFSMAC_MACOS_VERSION_OVERRIDE="12.6"
   run "$SCRIPT"

@@ -28,11 +28,74 @@ public struct PreferencesView: View {
     @ObservedObject public var settings: Settings
     @ObservedObject public var installer: HelperInstaller
     @ObservedObject public var uninstaller: HelperUninstaller
+    @ObservedObject public var updater: AppUpdateController
+    public var hasActiveMounts: Bool
     public let onBack: (() -> Void)?
     public let productVersion: ProductVersion
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var uninstallConfirmation: UninstallConfirmationPresentation
+
+    public init(
+        settings: Settings,
+        installer: HelperInstaller,
+        uninstaller: HelperUninstaller,
+        updater: AppUpdateController = AppUpdateController(),
+        hasActiveMounts: Bool = false,
+        onBack: (() -> Void)?
+    ) {
+        self.init(
+            settings: settings,
+            installer: installer,
+            uninstaller: uninstaller,
+            updater: updater,
+            hasActiveMounts: hasActiveMounts,
+            onBack: onBack,
+            productVersion: .current(),
+            uninstallConfirmation: .init()
+        )
+    }
+
+    public init(
+        settings: Settings,
+        installer: HelperInstaller,
+        uninstaller: HelperUninstaller,
+        updater: AppUpdateController = AppUpdateController(),
+        hasActiveMounts: Bool = false,
+        onBack: (() -> Void)?,
+        productVersion: ProductVersion
+    ) {
+        self.init(
+            settings: settings,
+            installer: installer,
+            uninstaller: uninstaller,
+            updater: updater,
+            hasActiveMounts: hasActiveMounts,
+            onBack: onBack,
+            productVersion: productVersion,
+            uninstallConfirmation: .init()
+        )
+    }
+
+    init(
+        settings: Settings,
+        installer: HelperInstaller,
+        uninstaller: HelperUninstaller,
+        updater: AppUpdateController = AppUpdateController(),
+        hasActiveMounts: Bool = false,
+        onBack: (() -> Void)?,
+        productVersion: ProductVersion,
+        uninstallConfirmation: UninstallConfirmationPresentation
+    ) {
+        self.settings = settings
+        self.installer = installer
+        self.uninstaller = uninstaller
+        self.updater = updater
+        self.hasActiveMounts = hasActiveMounts
+        self.onBack = onBack
+        self.productVersion = productVersion
+        _uninstallConfirmation = State(initialValue: uninstallConfirmation)
+    }
 
     public init(
         settings: Settings,
@@ -44,9 +107,9 @@ public struct PreferencesView: View {
             settings: settings,
             installer: installer,
             uninstaller: uninstaller,
-            onBack: onBack,
-            productVersion: .current(),
-            uninstallConfirmation: .init()
+            updater: AppUpdateController(),
+            hasActiveMounts: false,
+            onBack: onBack
         )
     }
 
@@ -61,26 +124,11 @@ public struct PreferencesView: View {
             settings: settings,
             installer: installer,
             uninstaller: uninstaller,
+            updater: AppUpdateController(),
+            hasActiveMounts: false,
             onBack: onBack,
-            productVersion: productVersion,
-            uninstallConfirmation: .init()
+            productVersion: productVersion
         )
-    }
-
-    init(
-        settings: Settings,
-        installer: HelperInstaller,
-        uninstaller: HelperUninstaller,
-        onBack: (() -> Void)?,
-        productVersion: ProductVersion,
-        uninstallConfirmation: UninstallConfirmationPresentation
-    ) {
-        self.settings = settings
-        self.installer = installer
-        self.uninstaller = uninstaller
-        self.onBack = onBack
-        self.productVersion = productVersion
-        _uninstallConfirmation = State(initialValue: uninstallConfirmation)
     }
 
     /// Source-compatible initializer for existing embeddings. The production app always supplies
@@ -166,6 +214,12 @@ public struct PreferencesView: View {
                 }
             }
 
+            Divider()
+
+            row(updateTitle, updateSubtitle) {
+                updateControl
+            }
+
             row("Uninstall ntfsmac", uninstallSubtitle) {
                 HStack(spacing: 6) {
                     if uninstaller.state == .removingDependencies || uninstaller.state == .removingHelper {
@@ -209,6 +263,82 @@ public struct PreferencesView: View {
 
     private var launchAtLoginSubtitle: String {
         settings.launchAtLoginMessage ?? "Start ntfsmac automatically on login"
+    }
+
+    private var updateTitle: String {
+        switch updater.state {
+        case .updateAvailable:
+            return "Software Update"
+        case .readyToRestart:
+            return "Update Ready"
+        default:
+            return "Software Update"
+        }
+    }
+
+    private var updateSubtitle: String {
+        switch updater.state {
+        case .idle:
+            return "ntfsmac \(productVersion.settingsText)"
+        case .checking:
+            return "Checking for updates…"
+        case .upToDate:
+            return "No new updates"
+        case .updateAvailable(let info):
+            return "New version available (\(info.version))"
+        case .downloading(let progress):
+            return "Downloading update… \(Int(progress * 100))%"
+        case .extracting:
+            return "Verifying update…"
+        case .readyToRestart(_, let version):
+            if hasActiveMounts {
+                return "Please unmount active drives before restarting"
+            }
+            return "Ready to restart into v\(version)"
+        case .failed(let message):
+            return "Update failed: \(message)"
+        }
+    }
+
+    @ViewBuilder
+    private var updateControl: some View {
+        switch updater.state {
+        case .idle, .upToDate:
+            Button("Check for Updates") {
+                Task { await updater.checkForUpdates() }
+            }
+            .buttonStyle(.glassNeutral(colorScheme: colorScheme))
+
+        case .checking, .extracting:
+            ProgressView().controlSize(.small)
+
+        case .updateAvailable:
+            Button("Download & Install") {
+                Task { await updater.downloadAndPrepare() }
+            }
+            .buttonStyle(.glassPrimary())
+
+        case .downloading(let progress):
+            VStack(alignment: .trailing, spacing: 2) {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .frame(width: 80)
+                    .controlSize(.small)
+            }
+
+        case .readyToRestart:
+            Button("Restart to Update") {
+                updater.restartAndApply(hasActiveMounts: hasActiveMounts)
+            }
+            .buttonStyle(.glassPrimary())
+            .disabled(hasActiveMounts)
+
+        case .failed:
+            Button("Retry") {
+                Task { await updater.checkForUpdates() }
+            }
+            .buttonStyle(.glassNeutral(colorScheme: colorScheme))
+        }
     }
 
     /// Inline (in-popover) two-step confirmation — a native `confirmationDialog` would dismiss

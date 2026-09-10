@@ -308,17 +308,14 @@ public final class DriveScanner: ObservableObject {
             microsoft = runner.run(anylinuxfsPath, ["list", "--microsoft"])
             linux = runner.run(anylinuxfsPath, ["list", "--linux"])
         } else {
-            async let microsoftProbe = Self.runOffMain(
+            // anylinuxfs enforces a global single-instance lock. Running the two family probes
+            // concurrently makes one nondeterministically fail with "another instance is already
+            // running"; when the empty Linux probe wins, the GUI incorrectly publishes no drives.
+            // Keep both calls off the main actor, but sequence them behind one detached operation.
+            (microsoft, linux) = await Self.runBothOffMain(
                 anylinuxfsPath,
-                ["list", "--microsoft"],
                 timeout: scanTimeout
             )
-            async let linuxProbe = Self.runOffMain(
-                anylinuxfsPath,
-                ["list", "--linux"],
-                timeout: scanTimeout
-            )
-            (microsoft, linux) = await (microsoftProbe, linuxProbe)
         }
         applyResults([microsoft, linux])
     }
@@ -406,6 +403,18 @@ public final class DriveScanner: ObservableObject {
     public func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+    }
+
+    private nonisolated static func runBothOffMain(
+        _ executablePath: String,
+        timeout: TimeInterval
+    ) async -> (CommandResult, CommandResult) {
+        await Task.detached(priority: .userInitiated) {
+            let runner = RealCommandRunner()
+            let microsoft = runner.run(executablePath, ["list", "--microsoft"], timeout: timeout)
+            let linux = runner.run(executablePath, ["list", "--linux"], timeout: timeout)
+            return (microsoft, linux)
+        }.value
     }
 
     private nonisolated static func runOffMain(

@@ -19,6 +19,7 @@ are already built into the vendored kernel image.
 
 ## What's new
 
+- **BitLocker encrypted volume support** — mount BitLocker-encrypted Windows partitions directly from the GUI or CLI using your password or 48-digit numerical recovery key.
 - **ext2/3/4 mount support** — mount Linux ext2, ext3, and ext4 partitions the same way as
   NTFS. The guest kernel's built-in ext4 driver handles all three (blkid auto-detects the
   type, no `--fs-driver` flag needed); no extra packages or kernel modules ship for it.
@@ -61,6 +62,8 @@ distributed as a Homebrew cask (see [Signing & distribution](#signing--distribut
 
 ```sh
 ntfsmac mount [disk identifier]      # mounts read/write (omit to pick from connected drives)
+ntfsmac mount disk4s1                           # prompts for password if BitLocker-encrypted
+echo "$KEY" | ntfsmac mount disk4s1 --bitlocker-credential-stdin # non-interactive BitLocker mount
 ntfsmac mount disk4s1 --preserve-private-relay  # keep iCloud Private Relay / VPNs uninterrupted
 ntfsmac mount disk4s1 --read-only               # mount read-only
 ntfsmac mount disk4s1 --fs-driver ntfs3         # opt into kernel ntfs3 driver (default: ntfs-3g)
@@ -75,10 +78,40 @@ ntfsmac help
 
 - `[device]` — Partition identifier (`diskNsM`, e.g. `disk4s1`). Omit to interactively select from detected drives.
 - `[mount_point]` — Custom mount path (default: `/Volumes/<label>`).
+- `--bitlocker-credential-stdin` (or `--recovery-key-stdin`) — Reads the BitLocker password or 48-digit recovery key from stdin (never exposed in argv, process lists, or shell history).
 - `--preserve-private-relay` — Bypasses host `pfctl -E` to keep iCloud Private Relay active while still installing the `/32` endpoint host route to prevent VPN tunnel capture.
 - `--read-only` — Client-side read-only NFS mount (`ro`).
 - `--fs-driver ntfs-3g|ntfs3` — NTFS driver choice (default: `ntfs-3g`). Ext2/3/4 drives automatically use the kernel ext4 driver.
 - `--ignore-permissions` — Maps ownership to local user (`all_squash`). Passed automatically for ext drives.
+
+### BitLocker Volumes (GUI & CLI)
+
+ntfsmac unlocks BitLocker-encrypted NTFS and FAT volumes with your user password or 48-digit numerical recovery key (`xxxxxx-xxxxxx-xxxxxx-...`).
+
+- **In the GUI**:
+  1. Connected BitLocker partitions appear with the `BitLocker` label in the menu-bar popover.
+  2. Click **Mount**. An unlock dialog overlay opens with a secure password field.
+  3. Type your BitLocker password or recovery key and click **Unlock & Mount** (or press Return).
+  4. If a volume was previously mounted read-only due to an unclean Windows shutdown, the yellow **Dirty Banner** also offers an inline credential prompt to unlock and remount read/write.
+  5. The password is kept strictly in transient memory during mount; it is never stored in macOS Keychain, app settings, or disk files.
+
+- **In the CLI (Interactive Terminal)**:
+  Run `ntfsmac mount diskNsM` (or run bare `ntfsmac mount` and pick the drive from the menu). If the volume is BitLocker-encrypted, ntfsmac prompts you securely:
+  ```text
+  Enter BitLocker password or recovery key for disk4s1: 
+  ```
+  Terminal echo is turned off (`read -s`), so your password is not shown on screen and is **never written to shell history** (`~/.zsh_history` or `~/.bash_history`).
+
+- **In the CLI (Scripted / Automation)**:
+  Pipe the password or recovery key via standard input using `--bitlocker-credential-stdin`:
+  ```sh
+  echo "111111-222222-333333-444444-555555-666666-777777-888888" | ntfsmac mount disk4s1 --bitlocker-credential-stdin
+  ```
+  Or stream it from a password manager:
+  ```sh
+  op read "op://vault/drive/password" | ntfsmac mount disk4s1 --bitlocker-credential-stdin
+  ```
+  Credentials are piped directly to the microVM via an unlinked anonymous descriptor (`/dev/fd/9`) — secrets never appear in `argv`, process inspection (`ps aux`), or logs.
 
 Device identifiers are validated against `^disk[0-9]+s[0-9]+$` before any command touches
 them — see [SECURITY.md](SECURITY.md).

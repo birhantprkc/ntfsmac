@@ -79,6 +79,12 @@ let package = Package(
                 "Style/Colors.swift", "Style/GlassTheme.swift", "Style/Icons.swift", "Style/PillButtons.swift",
                 "Style/TooltipCopy.swift",
                 "Views/PopoverContentView.swift",
+                "Update/ReleaseUpdateInfo.swift",
+                "Update/ReleaseCheckService.swift",
+                "Update/UpdateDownloadService.swift",
+                "Update/UpdateExtractionService.swift",
+                "Update/AppRelaunchService.swift",
+                "Update/AppUpdateController.swift",
             ]
         ),
         .executableTarget(
@@ -87,7 +93,7 @@ let package = Package(
             path: "gui",
             exclude: [
                 "Helper", "Status", "State", "Drives", "Views", "Actions", "FirstRun", "Preferences",
-                "Style", "Resources", "Info.plist", "Tests",
+                "Style", "Resources", "Info.plist", "Tests", "Update",
             ],
             sources: ["App/NtfsmacApp.swift", "App/DemoScaffold.swift"]
         ),

@@ -15,8 +15,36 @@ source "$SCRIPT_DIR/../lib/interactive-select.sh"
 source "$SCRIPT_DIR/../lib/security-transaction.sh"
 
 usage() {
-  echo "usage: mount.sh [--fs-driver ntfs-3g|ntfs3] [--read-only] [--ignore-permissions] [--preserve-private-relay] <device> [mount_point]" >&2
+  echo "usage: mount.sh [--fs-driver ntfs-3g|ntfs3] [--read-only] [--ignore-permissions] [--preserve-private-relay] [--bitlocker-credential-stdin] <device> [mount_point]" >&2
 }
+
+# Runs one mount with a credential read from stdin. A subshell scopes the EXIT/signal trap, so
+# the plaintext key file is removed on every return path without overwriting a caller's traps
+# when this file is sourced by tests.
+run_mount_with_stdin_credential() (
+  local device="$1" fs_driver="${2:-}" mount_point="${3:-}" read_only="${4:-}" ignore_perms="${5:-}"
+  local recovery_key="" key_file=""
+  IFS= read -r recovery_key || true
+  if [[ -z "$recovery_key" || ${#recovery_key} -gt 256 || "$recovery_key" == *$'\n'* || "$recovery_key" == *$'\r'* ]]; then
+    echo "mount: invalid or empty BitLocker password or recovery key" >&2
+    return 1
+  fi
+  key_file="$(mktemp "${TMPDIR:-/tmp}/ntfsmac-bitlocker.XXXXXX")" || return 1
+  trap 'rm -f -- "$key_file"' EXIT
+  trap 'exit 130' HUP INT TERM
+  chmod 600 "$key_file" || return 1
+  printf '%s' "$recovery_key" > "$key_file" || return 1
+  unset recovery_key
+  # Keep the credential only through an inherited read-only fd. Unlink the directory entry
+  # before anylinuxfs starts, so even SIGKILL/helper death cannot leave plaintext on disk.
+  exec 9<"$key_file" || return 1
+  rm -f -- "$key_file" || return 1
+  key_file=""
+  run_anylinuxfs_mount "$device" "$fs_driver" "$mount_point" "$read_only" "$ignore_perms" "/dev/fd/9"
+  local result=$?
+  exec 9<&-
+  return "$result"
+)
 
 cmd_mount() {
   # Real, upstream-documented requirement (vendor/src/anylinuxfs/docs/important-notes.md
@@ -36,7 +64,7 @@ cmd_mount() {
   # runtime status source is fail-closed: reconciliation preserves all existing anchors/routes.
   security_reconcile >/dev/null || true
 
-  local fs_driver="" device="" mount_point="" read_only="" ignore_perms=""
+  local fs_driver="" device="" mount_point="" read_only="" ignore_perms="" recovery_key_stdin="" credential_required_error=""
   local -a positional=()
 
   while [[ $# -gt 0 ]]; do
@@ -64,6 +92,17 @@ cmd_mount() {
         ;;
       --preserve-private-relay)
         export NTFSMAC_PRESERVE_PRIVATE_RELAY="1"
+        shift
+        ;;
+      # Internal-safe credential channel used by the GUI helper and CLI automation. The BitLocker
+      # recovery key is read from stdin and is never placed in argv, the process environment, logs, or state.
+      --bitlocker-credential-stdin|--recovery-key-stdin)
+        recovery_key_stdin="1"
+        shift
+        ;;
+      # GUI helper mode: never let anylinuxfs wait forever on its controlling-terminal prompt.
+      --credential-required-error)
+        credential_required_error="1"
         shift
         ;;
       --)
@@ -154,6 +193,37 @@ cmd_mount() {
     return 1
   fi
 
+  # The unprivileged GUI scan cannot always distinguish BitLocker from the generic GPT
+  # "Microsoft Basic Data" type. Re-probe here as root and return a machine-readable result
+  # before starting the VM when the GUI supplied no credential.
+  if [[ -n "$credential_required_error" && -z "$recovery_key_stdin" && -n "$ANYLINUXFS_BIN" ]]; then
+    local probe_output="" probe_tmp=""
+    probe_tmp="$(mktemp)" || return 1
+    if ! run_with_progress "${NTFSMAC_LIST_TIMEOUT:-20}" 5 "mount: probing encryption" "$probe_tmp" \
+      "$ANYLINUXFS_BIN" list --microsoft; then
+      rm -f "$probe_tmp"
+      echo "BITLOCKER_PROBE_FAILED: could not safely determine whether $device is encrypted; retry after the current scan finishes" >&2
+      return 1
+    fi
+    probe_output="$(<"$probe_tmp")"
+    rm -f "$probe_tmp"
+    if printf '%s\n' "$probe_output" | awk -v dev="$device" '$NF == dev && $0 ~ /BitLocker/ { found=1 } END { exit !found }'; then
+      echo "BITLOCKER_CREDENTIAL_REQUIRED: $device requires a password or recovery key" >&2
+      return 1
+    fi
+  fi
+
+  if [[ -n "$recovery_key_stdin" ]]; then
+    if run_mount_with_stdin_credential "$device" "$fs_driver" "$mount_point" "$read_only" "$ignore_perms"; then
+      security_apply_for_mount "$device" || \
+        echo "security_overall=unknown reason=SECURITY_TRANSACTION_FAILED" >&2
+      echo "mount: $device mounted"
+      return 0
+    fi
+    echo "mount: failed to mount $device" >&2
+    return 1
+  fi
+
   # ext needs --ignore-permissions (all_squash) so the macOS user can write past ext's Unix
   # ownership (see nfs-mount.sh). Only auto-set it when the caller didn't already pass
   # --ignore-permissions AND didn't explicitly name an NTFS driver — the picker already has
@@ -167,6 +237,38 @@ cmd_mount() {
     case "$fstype" in
       ext|ext2|ext3|ext4) ignore_perms="1" ;;
     esac
+  fi
+
+  # Interactive terminal: prompt for BitLocker credential if this drive is known or probed to be BitLocker
+  if [[ -z "$credential_required_error" && -t 0 ]]; then
+    local is_bitlocker=0
+    if [[ "$chosen_fstype" == "BitLocker" ]]; then
+      is_bitlocker=1
+    elif [[ -n "$ANYLINUXFS_BIN" ]]; then
+      local probe_tmp
+      probe_tmp="$(mktemp)"
+      if run_with_progress "${NTFSMAC_LIST_TIMEOUT:-20}" 5 "mount: probing encryption" "$probe_tmp" "$ANYLINUXFS_BIN" list --microsoft 2>/dev/null; then
+        if awk -v dev="$device" '$NF == dev && $0 ~ /BitLocker/ { found=1 } END { exit !found }' "$probe_tmp"; then
+          is_bitlocker=1
+        fi
+      fi
+      rm -f "$probe_tmp"
+    fi
+    if [[ "$is_bitlocker" -eq 1 ]]; then
+      local entered_key=""
+      read -s -r -p "Enter BitLocker password or recovery key for $device: " entered_key
+      echo "" >&2
+      if run_mount_with_stdin_credential "$device" "$fs_driver" "$mount_point" "$read_only" "$ignore_perms" <<< "$entered_key"; then
+        unset entered_key
+        security_apply_for_mount "$device" || \
+          echo "security_overall=unknown reason=SECURITY_TRANSACTION_FAILED" >&2
+        echo "mount: $device mounted"
+        return 0
+      fi
+      unset entered_key
+      echo "mount: failed to mount $device" >&2
+      return 1
+    fi
   fi
 
   if run_anylinuxfs_mount "$device" "$fs_driver" "$mount_point" "$read_only" "$ignore_perms"; then

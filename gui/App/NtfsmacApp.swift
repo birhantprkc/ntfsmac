@@ -46,6 +46,7 @@ struct NtfsmacApp: App {
     private let finderOpener = FinderOpener()
     private let helperClient = HelperClient()
     @StateObject private var cliAutoStager: CLIAutoStager
+    @StateObject private var appUpdateController = AppUpdateController()
 
     init() {
         let appState = AppState()
@@ -108,7 +109,8 @@ struct NtfsmacApp: App {
                 settings: settings,
                 finderOpener: finderOpener,
                 helperClient: helperClient,
-                navigation: navigation
+                navigation: navigation,
+                updater: appUpdateController
             )
             .popoverGlassBackground()
         } label: {

@@ -257,6 +257,46 @@ private let sampleExtOutput = """
 }
 
 @MainActor
+@Test func productionDriveScanRunsProbesSequentially() async throws {
+    let tempDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: tempDirectory,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+    let lockDir = tempDirectory.appendingPathComponent("instance.lock")
+    let fakeScript = tempDirectory.appendingPathComponent("fake-anylinuxfs")
+    try """
+    #!/bin/sh
+    if ! mkdir "\(lockDir.path)" 2>/dev/null; then
+        echo "another instance is already running" >&2
+        exit 1
+    fi
+    sleep 0.05
+    rmdir "\(lockDir.path)"
+    cat <<'EOF'
+    /dev/disk4 (external, physical):
+       #:                       TYPE NAME                    SIZE       IDENTIFIER
+       0:      GUID_partition_scheme                        *500.1 GB   disk4
+       1:                       ntfs My Drive                500.0 GB   disk4s2
+    EOF
+    exit 0
+    """.write(to: fakeScript, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeScript.path)
+
+    let scanner = DriveScanner(
+        anylinuxfsPath: fakeScript.path,
+        scanTimeout: 2,
+        cacheStateProvider: { .initialized }
+    )
+    await scanner.refresh()
+    #expect(scanner.lastError == nil)
+    #expect(scanner.drives.count == 1)
+}
+
+@MainActor
 @Test func productionDriveScanTerminatesAStalledProbe() async throws {
     let tempDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString, isDirectory: true)

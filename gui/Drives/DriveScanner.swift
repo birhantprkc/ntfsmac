@@ -58,7 +58,7 @@ public enum DriveListParser {
     /// multi-word, space-padded to fixed widths) and unnecessary: ident is unambiguous from
     /// the right, and fstype is derived from the blob's prefix by `deriveFsTypeAndLabel`.
     private static let partitionLine = try! NSRegularExpression(
-        pattern: #"^\s*\d+:\s+(.+?)\s+(\*?[0-9.]+\s+\S+)\s+(\S+)\s*$"#
+        pattern: #"^\s*\d+:\s+(.*?)(?:\s+|\s*(?=\*[0-9]))(\*?[0-9.]+\s+\S+)\s+(\S+)\s*$"#
     )
 
     public static func parse(_ output: String) -> [Drive] {

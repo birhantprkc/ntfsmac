@@ -89,6 +89,26 @@ private let sampleMultiDiskOutput = """
     #expect(drives[0].size == "*16.1 GB")
 }
 
+@Test func parsesUnpartitionedWholeDiskBitLockerWithTouchingAsterisk() {
+    let line = "   0:                  BitLocker SECUREDRIVE USB ...*16.1 GB    disk4"
+    let drives = DriveListParser.parse(line)
+    #expect(drives.count == 1)
+    #expect(drives[0].identifier == "disk4")
+    #expect(drives[0].fsType == "BitLocker")
+    #expect(drives[0].label == "SECUREDRIVE USB ...")
+    #expect(drives[0].size == "*16.1 GB")
+}
+
+@Test func parsesUnpartitionedWholeDiskNtfsWithTouchingAsterisk() {
+    let line = "   0:               Windows_NTFS A Very Long Volume Labe...*16.1 GB    disk4"
+    let drives = DriveListParser.parse(line)
+    #expect(drives.count == 1)
+    #expect(drives[0].identifier == "disk4")
+    #expect(drives[0].fsType == "ntfs")
+    #expect(drives[0].label == "A Very Long Volume Labe...")
+    #expect(drives[0].size == "*16.1 GB")
+}
+
 @MainActor
 @Test func driveListViewShowsEmptyPlaceholderWhenNoDrivesDetected() {
     // Acceptance: "render idle cleanly when empty" — DriveListView must not crash/hang on [].

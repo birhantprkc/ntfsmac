@@ -94,7 +94,7 @@ list_mountable_drives() {
   # multi-word, space-padded to fixed widths by darwin::augment_line) and unnecessary: ident
   # is unambiguous from the right, and fstype is derived from the blob's prefix below. The
   # fstype is display-only — mount.sh validates --fs-driver itself, never trusting the picker.
-  local drive_re='^[[:space:]]*[0-9]+:[[:space:]]+(.+[^[:space:]])[[:space:]]+([*]?[0-9.]+[[:space:]]+[A-Za-z]+)[[:space:]]+([A-Za-z0-9]+)[[:space:]]*$'
+  local drive_re='^[[:space:]]*[0-9]+:[[:space:]]+(.*)([*][0-9.]+[[:space:]]+[A-Za-z]+|[[:space:]]+[0-9.]+[[:space:]]+[A-Za-z]+)[[:space:]]+([A-Za-z0-9]+)[[:space:]]*$'
 
   tmp="$(mktemp)"
   if ! run_with_progress "$timeout" 5 "$label" "$tmp" "$ANYLINUXFS_BIN" list; then
@@ -105,6 +105,7 @@ list_mountable_drives() {
   while IFS= read -r line; do
     if [[ "$line" =~ $drive_re ]]; then
       local blob="${BASH_REMATCH[1]}" size="${BASH_REMATCH[2]}" ident="${BASH_REMATCH[3]}"
+      size="${size#"${size%%[![:space:]]*}"}"
       [[ "$ident" =~ ^disk[0-9]+(s[0-9]+)?$ ]] || continue
       # Derive fstype + label from the TYPE+NAME blob. The GPT type name "Microsoft Basic
       # Data" covers ntfs AND exfat (both use that GPT type), while "Windows_NTFS" is emitted
@@ -138,8 +139,9 @@ list_mountable_drives() {
         fstype="${blob%%[[:space:]]*}"
         label="${blob#"$fstype"}"
       fi
-      # ltrim label (the blob's leading spaces are gone, but the stripped prefix leaves any)
+      # ltrim and rtrim label (the blob's leading spaces are gone, but the stripped prefix leaves any)
       label="${label#"${label%%[![:space:]]*}"}"
+      label="${label%"${label##*[![:space:]]}"}"
       # Client-side allow-set filter (header comment): anylinuxfs list returns every Linux FS
       # type; only NTFS-family + ext2/3/4 are in ntfsmac's mount scope. Skip the rest.
       local allowed=0 t

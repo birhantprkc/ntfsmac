@@ -164,6 +164,23 @@ STUB
   [ ! -f "$CALL_LOG" ]
 }
 
+@test "GUI mode returns a credential-required result for whole-disk BitLocker drive with touching asterisk (disk4 on row 0)" {
+  cat > "$STUB_DIR/anylinuxfs" <<STUB
+#!/bin/bash
+if [[ "\$1" == "list" ]]; then
+  echo '   0:                  BitLocker SECUREDRIVE USB ...*16.1 GB    disk4'
+  exit 0
+fi
+echo "\$@" >> "$CALL_LOG"
+exit 0
+STUB
+  chmod +x "$STUB_DIR/anylinuxfs"
+  run "$SCRIPT" --credential-required-error disk4
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BITLOCKER_CREDENTIAL_REQUIRED"* ]]
+  [ ! -f "$CALL_LOG" ]
+}
+
 @test "BitLocker recovery key works with whole-disk device (disk4)" {
   local recovery_key="111111-222222-333333-444444-555555-666666-777777-888888"
   run "$SCRIPT" --bitlocker-credential-stdin disk4 <<< "$recovery_key"

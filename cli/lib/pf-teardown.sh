@@ -13,15 +13,16 @@ source "$SCRIPT_DIR/security-transaction.sh"
 
 teardown_pf() {
   local target="${1:-}"
-  case "$target" in
-    --all) security_teardown_all ;;
-    "") security_reconcile ;;
-    disk[0-9]*s[0-9]*) security_teardown_session "$target" ;;
-    *)
-      echo "pf-teardown: expected diskNsM, --all, or no argument" >&2
-      return 1
-      ;;
-  esac
+  if [[ "$target" == "--all" ]]; then
+    security_teardown_all
+  elif [[ -z "$target" ]]; then
+    security_reconcile
+  elif security_valid_session "$target"; then
+    security_teardown_session "$target"
+  else
+    echo "pf-teardown: expected device identifier (diskN or diskNsM), --all, or no argument" >&2
+    return 1
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

@@ -345,3 +345,27 @@ STUB
   [ -z "$output" ]
 }
 
+@test "list_mountable_drives surfaces whole-disk BitLocker with touching asterisk and truncated label" {
+  cat > "$STUB_DIR/anylinuxfs" <<STUB
+#!/bin/bash
+printf '%s\n' '   0:                  BitLocker SECUREDRIVE USB ...*16.1 GB    disk4'
+exit 0
+STUB
+  chmod +x "$STUB_DIR/anylinuxfs"
+  run list_mountable_drives
+  [ "$status" -eq 0 ]
+  [ "$output" = $'disk4\tSECUREDRIVE USB ...\t*16.1 GB\tBitLocker' ]
+}
+
+@test "list_mountable_drives surfaces whole-disk NTFS with touching asterisk and truncated label" {
+  cat > "$STUB_DIR/anylinuxfs" <<STUB
+#!/bin/bash
+printf '%s\n' '   0:               Windows_NTFS A Very Long Volume Labe...*16.1 GB    disk4'
+exit 0
+STUB
+  chmod +x "$STUB_DIR/anylinuxfs"
+  run list_mountable_drives
+  [ "$status" -eq 0 ]
+  [ "$output" = $'disk4\tA Very Long Volume Labe...\t*16.1 GB\tntfs' ]
+}
+

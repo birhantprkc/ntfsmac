@@ -224,17 +224,18 @@ cmd_mount() {
     return 1
   fi
 
+  local detected_fstype="$chosen_fstype"
+  if [[ -z "$detected_fstype" ]]; then
+    detected_fstype="$(fs_type_for_device "$device")"
+  fi
+
   # ext needs --ignore-permissions (all_squash) so the macOS user can write past ext's Unix
   # ownership (see nfs-mount.sh). Only auto-set it when the caller didn't already pass
   # --ignore-permissions AND didn't explicitly name an NTFS driver — the picker already has
   # the fstype in hand (no probe), the direct path probes fs_type_for_device (one `anylinuxfs
   # list`). NTFS is left untouched: "do not change the NTFS part".
   if [[ -z "$ignore_perms" && -z "$explicit_driver" ]]; then
-    local fstype="$chosen_fstype"
-    if [[ -z "$fstype" ]]; then
-      fstype="$(fs_type_for_device "$device")"
-    fi
-    case "$fstype" in
+    case "$detected_fstype" in
       ext|ext2|ext3|ext4) ignore_perms="1" ;;
     esac
   fi
@@ -242,7 +243,7 @@ cmd_mount() {
   # Interactive terminal: prompt for BitLocker credential if this drive is known or probed to be BitLocker
   if [[ -z "$credential_required_error" && -t 0 ]]; then
     local is_bitlocker=0
-    if [[ "$chosen_fstype" == "BitLocker" ]]; then
+    if [[ "$detected_fstype" == "BitLocker" ]]; then
       is_bitlocker=1
     elif [[ -n "$ANYLINUXFS_BIN" ]]; then
       local probe_tmp

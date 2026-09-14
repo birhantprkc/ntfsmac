@@ -236,6 +236,12 @@ public struct CommandResult: Codable, Sendable {
     /// entirely, doesn't answer at all) — both read as stale to the caller.
     func version(reply: @escaping (String?) -> Void)
 
+    /// Runs `anylinuxfs list --microsoft` and `anylinuxfs list --linux` as root to enumerate all
+    /// mountable NTFS, BitLocker, and ext partitions. Because the helper runs as root, unpartitioned
+    /// whole-disk devices (e.g. BitLocker To Go USB drives on disk4) can be read with libblkid
+    /// without the permission errors an unprivileged GUI process hits.
+    func listDrives(reply: @escaping (Data?, String?) -> Void)
+
     /// Self-termination path for GUI Quit. The GUI's Quit flow first calls `unmount`/`teardown`
     /// for cleanup, then this so the privileged launchd on-demand helper doesn't linger as root
     /// after the app closes (Activity Monitor can't kill it without sudo — it must exit itself
@@ -673,6 +679,32 @@ public final class HelperService: NSObject, HelperXPCProtocol {
 
     public func version(reply: @escaping (String?) -> Void) {
         reply(expectedCLITreeHash)
+    }
+
+    public func listDrives(reply: @escaping (Data?, String?) -> Void) {
+        Self.mutationLock.lock()
+        defer { Self.mutationLock.unlock() }
+        let prefixBin = "\(resolvePrefix())/bin/anylinuxfs"
+        let anylinuxfs = FileManager.default.isExecutableFile(atPath: prefixBin) ? prefixBin : resolveAnylinuxfsPath()
+        guard FileManager.default.isExecutableFile(atPath: anylinuxfs) else {
+            reply(nil, "rejected: anylinuxfs not found or not executable at \(anylinuxfs)")
+            return
+        }
+        let microsoft = runner.run(anylinuxfs, ["list", "--microsoft"])
+        let linux = runner.run(anylinuxfs, ["list", "--linux"])
+        let exitCode: Int32
+        let combinedOutput: String
+        if microsoft.exitCode == 0 || linux.exitCode == 0 {
+            exitCode = 0
+            var outputs: [String] = []
+            if !microsoft.output.isEmpty { outputs.append(microsoft.output) }
+            if !linux.output.isEmpty { outputs.append(linux.output) }
+            combinedOutput = outputs.joined(separator: "\n")
+        } else {
+            exitCode = microsoft.exitCode != 0 ? microsoft.exitCode : linux.exitCode
+            combinedOutput = [microsoft.output, linux.output].filter { !$0.isEmpty }.joined(separator: "\n")
+        }
+        encode(CommandResult(output: combinedOutput, exitCode: exitCode), reply: reply)
     }
 
     public func uninstallHelper(reply: @escaping (Data?, String?) -> Void) {

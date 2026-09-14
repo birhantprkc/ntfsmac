@@ -168,6 +168,10 @@ public final class HelperClient: Sendable {
         try await call { proxy, reply in proxy.stageCLI(installScriptPath: installScriptPath, reply: reply) }
     }
 
+    public func listDrives() async throws -> CommandResult {
+        try await call { proxy, reply in proxy.listDrives(reply: reply) }
+    }
+
     /// Bare string reply, not a `CommandResult` — `version` never runs a shell command, so
     /// there's no exit code/output to wrap. Same error-handler-rejects-the-continuation wiring
     /// as `call()`, so a stale/unresponsive helper (the exact case this method exists to detect)

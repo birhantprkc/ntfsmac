@@ -44,13 +44,15 @@ struct NtfsmacApp: App {
     @StateObject private var navigation = PopoverNavigation()
 
     private let finderOpener = FinderOpener()
-    private let helperClient = HelperClient()
+    private let helperClient: HelperClient
     @StateObject private var cliAutoStager: CLIAutoStager
     @StateObject private var appUpdateController = AppUpdateController()
 
     init() {
         let appState = AppState()
         _appState = StateObject(wrappedValue: appState)
+        let helperClient = HelperClient()
+        self.helperClient = helperClient
 
         // See `DemoScaffold.swift`: inert unless NTFSMAC_UI_DEMO is explicitly set. Real installs
         // never set it, so this branch never runs outside a deliberate live-screen audit.
@@ -60,7 +62,7 @@ struct NtfsmacApp: App {
             _remountController = StateObject(wrappedValue: DemoScaffold.remountController(appState: appState))
             _throughputMonitor = StateObject(wrappedValue: DemoScaffold.throughputMonitor())
         } else {
-            _driveScanner = StateObject(wrappedValue: DriveScanner())
+            _driveScanner = StateObject(wrappedValue: DriveScanner(helper: helperClient))
             _mountController = StateObject(wrappedValue: MountController(appState: appState))
             _remountController = StateObject(wrappedValue: RemountController(appState: appState))
             _throughputMonitor = StateObject(wrappedValue: ThroughputMonitor())
@@ -129,6 +131,7 @@ struct NtfsmacApp: App {
                     }
                     guard helperInstaller.state == .installed else { return }
                     await cliAutoStager.stageIfNeeded()
+                    await driveScanner.refresh()
                 }
         }
         .menuBarExtraStyle(.window)

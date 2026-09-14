@@ -565,3 +565,46 @@ private final class FakeSlowRunner: PrivilegedCommandRunning {
     }
 }
 
+private final class FakeDriveListingHelper: DriveListingHelper {
+    var stubbedResult = CommandResult(
+        output: "   0:                  BitLocker SECUREDRIVE USB ...*16.1 GB    disk4\n",
+        exitCode: 0
+    )
+    var shouldThrow = false
+    private(set) var callCount = 0
+
+    func listDrives() async throws -> CommandResult {
+        callCount += 1
+        if shouldThrow {
+            throw NSError(domain: "HelperError", code: 1)
+        }
+        return stubbedResult
+    }
+}
+
+@MainActor
+@Test func driveScannerUsesPrivilegedHelperWhenAvailable() async {
+    let helper = FakeDriveListingHelper()
+    let scanner = DriveScanner(helper: helper, cacheStateProvider: { .initialized })
+    await scanner.refresh()
+
+    #expect(helper.callCount == 1)
+    #expect(scanner.drives.count == 1)
+    #expect(scanner.drives[0].identifier == "disk4")
+    #expect(scanner.drives[0].fsType == "BitLocker")
+    #expect(scanner.drives[0].size == "*16.1 GB")
+}
+
+@MainActor
+@Test func driveScannerFallsBackToRunnerWhenHelperThrows() async {
+    let helper = FakeDriveListingHelper()
+    helper.shouldThrow = true
+    let runner = FakeListRunner()
+    let scanner = DriveScanner(runner: runner, helper: helper, anylinuxfsPath: "/stub/anylinuxfs")
+    await scanner.refresh()
+
+    #expect(helper.callCount == 1)
+    #expect(runner.calls.count == 2)
+    #expect(scanner.drives.map(\.identifier) == ["disk4s2", "disk4s3"])
+}
+

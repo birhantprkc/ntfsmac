@@ -696,3 +696,55 @@ private final class ExitSinkProbe: @unchecked Sendable {
     _ = service
     #expect(true)
 }
+
+// MARK: - listDrives
+
+@Test func listDrivesRunsMicrosoftAndLinuxProbesSequentiallyAndCombinesOutput() async throws {
+    let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("listDrivesTest-\(UUID().uuidString)")
+    let binDir = tmpDir.appendingPathComponent("bin")
+    try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+    let anylinuxfsPath = binDir.appendingPathComponent("anylinuxfs")
+    try "#!/bin/sh\nexit 0".write(to: anylinuxfsPath, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: anylinuxfsPath.path)
+
+    let runner = FakeRunner()
+    runner.stubbedResult = CommandResult(
+        output: "   0:                  BitLocker SECUREDRIVE USB ...*16.1 GB    disk4\n",
+        exitCode: 0
+    )
+
+    let service = HelperService(
+        runner: runner,
+        ntfsmacPrefix: tmpDir.path
+    )
+
+    let (data, error) = await awaitReply { service.listDrives(reply: $0) }
+    #expect(error == nil)
+    guard let data, let result = try? JSONDecoder().decode(CommandResult.self, from: data) else {
+        Issue.record("Expected valid CommandResult in data")
+        return
+    }
+
+    #expect(result.exitCode == 0)
+    #expect(result.output.contains("disk4"))
+    #expect(result.output.contains("BitLocker"))
+    #expect(runner.calls.count == 2)
+    #expect(runner.calls[0].arguments == ["list", "--microsoft"])
+    #expect(runner.calls[1].arguments == ["list", "--linux"])
+}
+
+@Test func listDrivesRejectsWhenAnylinuxfsIsMissing() async throws {
+    let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("listDrivesMissing-\(UUID().uuidString)")
+    let runner = FakeRunner()
+    let service = HelperService(
+        runner: runner,
+        ntfsmacPrefix: tmpDir.path
+    )
+
+    let (data, error) = await awaitReply { service.listDrives(reply: $0) }
+    #expect(data == nil)
+    #expect(error?.contains("rejected: anylinuxfs not found") == true)
+    #expect(runner.calls.isEmpty)
+}

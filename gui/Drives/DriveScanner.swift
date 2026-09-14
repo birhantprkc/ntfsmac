@@ -135,6 +135,14 @@ public enum AlpineRuntimeCacheState: Sendable, Equatable {
     case incomplete
 }
 
+/// Seam over privileged drive listing via the Helper daemon.
+@MainActor
+public protocol DriveListingHelper: Sendable {
+    func listDrives() async throws -> CommandResult
+}
+
+extension HelperClient: DriveListingHelper {}
+
 /// `DriveListParser.allowedFsTypes` filters to ntfsmac's narrower scope (NTFS-family + ext2/3/4) client-side.
 /// Reuses `HelperShared`'s `PrivilegedCommandRunning`/`RealCommandRunner` seam (already used by `HelperService`)
 /// instead of a second process-spawn helper — this call itself is unprivileged, only the runner shape
@@ -150,6 +158,7 @@ public final class DriveScanner: ObservableObject {
     // shared protocol is intentionally not Sendable. Production leaves this nil and creates the
     // concrete value inside the detached operation, so no non-Sendable instance crosses actors.
     private let runner: (any PrivilegedCommandRunning)?
+    private let helper: (any DriveListingHelper)?
     private let anylinuxfsPath: String
     private let scanTimeout: TimeInterval
     private let firstRunTimeout: TimeInterval
@@ -161,6 +170,7 @@ public final class DriveScanner: ObservableObject {
 
     public init(
         runner: (any PrivilegedCommandRunning)? = nil,
+        helper: (any DriveListingHelper)? = nil,
         anylinuxfsPath: String = resolveAnylinuxfsPath(),
         scanTimeout: TimeInterval = 10,
         firstRunTimeout: TimeInterval? = nil,
@@ -168,6 +178,7 @@ public final class DriveScanner: ObservableObject {
         cachePreserver: (@MainActor () -> Bool)? = nil
     ) {
         self.runner = runner
+        self.helper = helper
         self.anylinuxfsPath = anylinuxfsPath
         self.scanTimeout = scanTimeout
         self.firstRunTimeout = firstRunTimeout ?? (scanTimeout < 1 ? scanTimeout : 240)
@@ -303,6 +314,18 @@ public final class DriveScanner: ObservableObject {
     }
 
     private func performStandardScan() async {
+        if let helper {
+            do {
+                let helperResult = try await helper.listDrives()
+                if helperResult.exitCode == 0 {
+                    applyResults([helperResult])
+                    return
+                }
+            } catch {
+                // Helper unavailable, not installed yet, or error; fall through to unprivileged runner
+            }
+        }
+
         let microsoft: CommandResult
         let linux: CommandResult
         if let runner {

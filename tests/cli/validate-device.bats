@@ -16,10 +16,19 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "rejects disk2 (no slice)" {
+@test "accepts disk2 (whole-disk device without slice)" {
   run validate_device "disk2"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"rejected"* ]]
+  [ "$status" -eq 0 ]
+}
+
+@test "accepts disk4 (whole-disk device without slice)" {
+  run validate_device "disk4"
+  [ "$status" -eq 0 ]
+}
+
+@test "accepts disk10 (multi-digit whole-disk device without slice)" {
+  run validate_device "disk10"
+  [ "$status" -eq 0 ]
 }
 
 @test "rejects a shell-injection payload" {
@@ -47,5 +56,15 @@ setup() {
 
 @test "rejects trailing garbage after a valid device" {
   run validate_device "disk2s1foo"
+  [ "$status" -ne 0 ]
+}
+
+@test "rejects trailing garbage after a whole-disk device" {
+  run validate_device "disk4foo"
+  [ "$status" -ne 0 ]
+}
+
+@test "rejects bare 'disk' without number" {
+  run validate_device "disk"
   [ "$status" -ne 0 ]
 }

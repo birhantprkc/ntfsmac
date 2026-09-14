@@ -105,7 +105,7 @@ list_mountable_drives() {
   while IFS= read -r line; do
     if [[ "$line" =~ $drive_re ]]; then
       local blob="${BASH_REMATCH[1]}" size="${BASH_REMATCH[2]}" ident="${BASH_REMATCH[3]}"
-      [[ "$ident" =~ ^disk[0-9]+s[0-9]+$ ]] || continue
+      [[ "$ident" =~ ^disk[0-9]+(s[0-9]+)?$ ]] || continue
       # Derive fstype + label from the TYPE+NAME blob. The GPT type name "Microsoft Basic
       # Data" covers ntfs AND exfat (both use that GPT type), while "Windows_NTFS" is emitted
       # for MBR NTFS partitions. exfat is out of scope — when

@@ -39,6 +39,13 @@ teardown() {
   [[ "$output" == "unmount /dev/disk2s1" ]]
 }
 
+@test "unmounts a bare whole-disk device (disk4) by adding /dev/ prefix" {
+  run "$SCRIPT" disk4
+  [ "$status" -eq 0 ]
+  run cat "$CALL_LOG"
+  [[ "$output" == *"unmount /dev/disk4"* ]]
+}
+
 @test "unmounts a mount point path as-is" {
   run "$SCRIPT" /Volumes/MyDrive
   [ "$status" -eq 0 ]

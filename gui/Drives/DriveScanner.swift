@@ -31,9 +31,10 @@ public struct Drive: Identifiable, Equatable, Sendable {
 /// (confirmed in `cli.rs`, same finding `3-xpc-helper` made for mount/unmount) — the real output
 /// is `diskutil list`, augmented in place: `darwin::augment_line` substitutes the TYPE column
 /// with the real fs_type and the NAME column with the volume label at fixed widths
-/// (`vendor/src/anylinuxfs/anylinuxfs/src/diskutil/{mod,darwin}.rs`). Whole-disk rows (index 0,
-/// scheme line) and the header line never end in a `diskNsM` identifier, so anchoring on
-/// `validateDevice` for the trailing token naturally excludes them without special-casing.
+/// (`vendor/src/anylinuxfs/anylinuxfs/src/diskutil/{mod,darwin}.rs`). Whole-disk partition
+/// scheme headers (e.g. "GUID_partition_scheme" on index 0) and the header line are
+/// naturally excluded by `allowedFsTypes`. Unpartitioned whole-disk drives (e.g. BitLocker To Go
+/// or superfloppy volumes) surface on row 0 with an allowed fsType and are parsed as valid drives.
 ///
 /// The TYPE column is NOT always a single blkid fstype token: for NTFS, blkid's fs_type can be
 /// empty, so `augment_line` falls back to the raw partition type. GPT then reports "Microsoft

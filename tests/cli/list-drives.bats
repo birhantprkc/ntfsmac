@@ -308,3 +308,40 @@ STUB
   [[ "$output" == *"disk2s1"* ]]
   [[ "$output" != *"first run"* ]]
 }
+
+@test "list_mountable_drives surfaces unpartitioned whole-disk BitLocker (disk4 on row 0)" {
+  cat > "$STUB_DIR/anylinuxfs" <<STUB
+#!/bin/bash
+printf '%s\n' '   0:                  BitLocker                        *16.1 GB    disk4'
+exit 0
+STUB
+  chmod +x "$STUB_DIR/anylinuxfs"
+  run list_mountable_drives
+  [ "$status" -eq 0 ]
+  [ "$output" = $'disk4\t\t*16.1 GB\tBitLocker' ]
+}
+
+@test "list_mountable_drives surfaces unpartitioned whole-disk NTFS (disk4 on row 0)" {
+  cat > "$STUB_DIR/anylinuxfs" <<STUB
+#!/bin/bash
+printf '%s\n' '   0:                       ntfs FlashDrive             *16.1 GB    disk4'
+exit 0
+STUB
+  chmod +x "$STUB_DIR/anylinuxfs"
+  run list_mountable_drives
+  [ "$status" -eq 0 ]
+  [ "$output" = $'disk4\tFlashDrive\t*16.1 GB\tntfs' ]
+}
+
+@test "list_mountable_drives still excludes partition scheme headers on row 0" {
+  cat > "$STUB_DIR/anylinuxfs" <<STUB
+#!/bin/bash
+printf '%s\n' '   0:      GUID_partition_scheme                        *16.1 GB    disk4'
+exit 0
+STUB
+  chmod +x "$STUB_DIR/anylinuxfs"
+  run list_mountable_drives
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+

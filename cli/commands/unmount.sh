@@ -84,12 +84,12 @@ cmd_unmount() {
   # (e.g. a typo'd subcommand like "help") is rejected here rather than handed to
   # anylinuxfs, which would otherwise report a fake "unmounted" success for garbage input.
   local arg="$target"
-  if [[ "$target" =~ ^disk[0-9]+s[0-9]+$ ]]; then
+  if [[ "$target" =~ ^disk[0-9]+(s[0-9]+)?$ ]]; then
     arg="/dev/${target}"
   elif [[ "$target" == /Volumes/* && "$target" != *..* ]]; then
     arg="$target"
   else
-    echo "unmount: invalid target '$target' (expected diskNsM or /Volumes/<name>)" >&2
+    echo "unmount: invalid target '$target' (expected diskN, diskNsM, or /Volumes/<name>)" >&2
     return 1
   fi
 

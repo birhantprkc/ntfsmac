@@ -46,7 +46,7 @@ SECURITY_PREPARED_ROUTE_STATE="unknown"
 SECURITY_PREPARED_ROUTE_REASON="ROUTE_UNMEASURED"
 
 security_valid_session() {
-  [[ "${1:-}" =~ ^disk[0-9]+s[0-9]+$ ]]
+  [[ "${1:-}" =~ ^disk[0-9]+(s[0-9]+)?$ ]]
 }
 
 security_state_path() {

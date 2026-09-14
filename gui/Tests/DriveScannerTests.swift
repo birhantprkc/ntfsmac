@@ -55,10 +55,38 @@ private let sampleMultiDiskOutput = """
     #expect(DriveListParser.parse(garbage).isEmpty)
 }
 
-@Test func rejectsIdentifierMissingPartitionSuffix() {
-    // A whole-disk-only line (no `sN` suffix) must never parse as a mountable drive (L6).
+@Test func rejectsPartitionSchemeHeaderOnRowZero() {
+    // A whole-disk partition scheme line (e.g. GUID_partition_scheme) must never parse as a mountable drive.
     let wholeDiskOnly = "   0:      GUID_partition_scheme                        *500.1 GB   disk4"
     #expect(DriveListParser.parse(wholeDiskOnly).isEmpty)
+}
+
+@Test func parsesUnpartitionedWholeDiskBitLocker() {
+    let unpartitioned = """
+    /dev/disk4 (external, physical):
+       #:                       TYPE NAME                    SIZE       IDENTIFIER
+       0:                  BitLocker                        *16.1 GB    disk4
+    """
+    let drives = DriveListParser.parse(unpartitioned)
+    #expect(drives.count == 1)
+    #expect(drives[0].identifier == "disk4")
+    #expect(drives[0].fsType == "BitLocker")
+    #expect(drives[0].label == "")
+    #expect(drives[0].size == "*16.1 GB")
+}
+
+@Test func parsesUnpartitionedWholeDiskNtfs() {
+    let unpartitioned = """
+    /dev/disk4 (external, physical):
+       #:                       TYPE NAME                    SIZE       IDENTIFIER
+       0:                       ntfs FlashDrive             *16.1 GB    disk4
+    """
+    let drives = DriveListParser.parse(unpartitioned)
+    #expect(drives.count == 1)
+    #expect(drives[0].identifier == "disk4")
+    #expect(drives[0].fsType == "ntfs")
+    #expect(drives[0].label == "FlashDrive")
+    #expect(drives[0].size == "*16.1 GB")
 }
 
 @MainActor

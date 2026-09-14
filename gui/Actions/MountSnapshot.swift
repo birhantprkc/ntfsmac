@@ -51,7 +51,7 @@ public protocol MountSnapshotProviding {
 /// The username is intentionally ignored and never reaches the GUI state.
 public enum AnyLinuxFSStatusParser {
     private static let linePattern = try! NSRegularExpression(
-        pattern: #"^(?:/dev/)?(disk[0-9]+s[0-9]+) on (.+) \((.*)\) VM\[cpus:"#
+        pattern: #"^(?:/dev/)?(disk[0-9]+(?:s[0-9]+)?) on (.+) \((.*)\) VM\[cpus:"#
     )
 
     public static func parse(_ output: String) -> [ObservedMount] {
@@ -102,7 +102,7 @@ public enum MountTableParser {
         pattern: #"^(\S+) on (.+) \(nfs(?:,\s*(.*))?\)$"#
     )
     private static let ntfsmacHost = try! NSRegularExpression(
-        pattern: #"^(disk[0-9]+s[0-9]+)(?:-[0-9]+)?\.local:"#,
+        pattern: #"^(disk[0-9]+(?:s[0-9]+)?)(?:-[0-9]+)?\.local:"#,
         options: [.caseInsensitive]
     )
 

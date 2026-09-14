@@ -425,7 +425,7 @@ check_nfs_transport_contract() {
     source="${line%% on *}"
     [[ "$source" != "$line" ]] || continue
     host="${source%%:*}"
-    if [[ "$host" =~ ^disk[0-9]+s[0-9]+(-[0-9]+)?\.local$ ]]; then
+    if [[ "$host" =~ ^disk[0-9]+(s[0-9]+)?(-[0-9]+)?\.local$ ]]; then
       :
     elif [[ "$helper" == "vmnet" && "$host" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]+\.[0-9]+$ ]]; then
       :

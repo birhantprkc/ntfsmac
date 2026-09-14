@@ -10,7 +10,8 @@ import CryptoKit
 
 /// PLAN.md L6 — device names are validated against this pattern before touching any shell
 /// invocation, in both the CLI (`cli/lib/validate-device.sh`) and here, independently.
-public let deviceNamePattern = "^disk[0-9]+s[0-9]+$"
+/// Accepts "diskNsM" (e.g. disk2s1) or "diskN" (e.g. disk4 for unpartitioned BitLocker/NTFS).
+public let deviceNamePattern = "^disk[0-9]+(s[0-9]+)?$"
 
 public func validateDevice(_ device: String) -> Bool {
     device.range(of: deviceNamePattern, options: .regularExpression) != nil

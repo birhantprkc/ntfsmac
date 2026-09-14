@@ -46,8 +46,8 @@ private func awaitReply(_ body: (@escaping (Data?, String?) -> Void) -> Void) as
     #expect(validateDevice("disk10s3"))
 }
 
-@Test func rejectsDiskWithNoSlice() {
-    #expect(!validateDevice("disk2"))
+@Test func acceptsDiskWithNoSlice() {
+    #expect(validateDevice("disk2"))
 }
 
 @Test func rejectsShellInjectionPayload() {
@@ -98,6 +98,27 @@ private func awaitReply(_ body: (@escaping (Data?, String?) -> Void) -> Void) as
     // despite both feeding the same vendored anylinuxfs mount/unmount code.
     #expect(!isValidUnmountTarget("/Volumes/foo\"; rm -rf /;\""))
     #expect(!isValidUnmountTarget("/Volumes/foo`touch /tmp/pwned`"))
+}
+
+@Test func validateDeviceAcceptsWholeDiskAndPartitionedDevices() {
+    #expect(validateDevice("disk4"))
+    #expect(validateDevice("disk2"))
+    #expect(validateDevice("disk10"))
+    #expect(validateDevice("disk2s1"))
+    #expect(validateDevice("disk10s3"))
+
+    #expect(!validateDevice("disk"))
+    #expect(!validateDevice("disk2s"))
+    #expect(!validateDevice("disk4foo"))
+    #expect(!validateDevice("/dev/disk4"))
+    #expect(!validateDevice("disk4; rm -rf /"))
+    #expect(!validateDevice(""))
+}
+
+@Test func isValidUnmountTargetAcceptsWholeDiskDevice() {
+    #expect(isValidUnmountTarget("disk4"))
+    #expect(isValidUnmountTarget("disk2s1"))
+    #expect(!isValidUnmountTarget("disk4; rm -rf /"))
 }
 
 // MARK: - CommandResult protocol encoding

@@ -4,13 +4,14 @@
 # gets to write its own regex.
 set -u
 
-# validate_device <device> — accepts only "diskNsM" (e.g. disk2s1). Rejects everything
+# validate_device <device> — accepts "diskNsM" (e.g. disk2s1) or "diskN" (e.g. disk4 for
+# unpartitioned superfloppy/whole-disk BitLocker or NTFS drives). Rejects everything
 # else, including a leading "/dev/" and shell-metacharacter payloads, with a stderr
 # message and non-zero exit.
 validate_device() {
   local device="${1:-}"
-  if [[ ! "$device" =~ ^disk[0-9]+s[0-9]+$ ]]; then
-    echo "validate-device: rejected device string: '$device' (must match ^disk[0-9]+s[0-9]+\$)" >&2
+  if [[ ! "$device" =~ ^disk[0-9]+(s[0-9]+)?$ ]]; then
+    echo "validate-device: rejected device string: '$device' (must match ^disk[0-9]+(s[0-9]+)?\$)" >&2
     return 1
   fi
   return 0

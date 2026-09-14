@@ -31,7 +31,7 @@ time isn't SLA-backed, but security reports get priority over feature work.
   trust-model limitation (see `CLAUDE.md`'s non-negotiables) — reports that just restate
   "this isn't notarized" without a concrete exploit path aren't actionable findings.
 - **Device validation:** every command path validates device identifiers against
-  `^disk[0-9]+s[0-9]+$` before any shell invocation, in both the CLI and the GUI/helper. A
+  `^disk[0-9]+(s[0-9]+)?$` before any shell invocation, in both the CLI and the GUI/helper. A
   bypass of that check is a valid, high-priority report.
 - **Privilege boundary:** every mount/unmount/pf/route action must route through the
   SMJobBless XPC helper. A code path that shells out to `sudo` directly from GUI code, or an

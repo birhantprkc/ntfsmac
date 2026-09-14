@@ -113,8 +113,9 @@ ntfsmac unlocks BitLocker-encrypted NTFS and FAT volumes with your user password
   ```
   Credentials are piped directly to the microVM via an unlinked anonymous descriptor (`/dev/fd/9`) — secrets never appear in `argv`, process inspection (`ps aux`), or logs.
 
-Device identifiers are validated against `^disk[0-9]+s[0-9]+$` before any command touches
-them — see [SECURITY.md](SECURITY.md).
+Device identifiers are validated against `^disk[0-9]+(s[0-9]+)?$` before any command touches
+them — supporting both sliced partitions (`disk4s1`) and unpartitioned whole-disk volumes
+(`disk4`, such as BitLocker To Go USB flash drives) — see [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 
@@ -191,37 +192,16 @@ issue. This only affects access *from that app*:
   Settings → Privacy & Security → Full Disk Access → add Terminal**, restart
   Terminal. Readers who only ever write via Finder can leave Terminal FDA off.
 
-**A drive doesn't show up / macOS says "unidentifiable."** ntfsmac mounts
-**partitions** (`diskNsN`, e.g. `disk4s1`), never a whole disk (`disk4`) — the device
-name is validated against `^disk[0-9]+s[0-9]+$` before any command touches it. If macOS
-shows "The disk you attached was not readable by this computer" and `diskutil list`
-shows the drive with no partition rows under it (a `diskN` with a blank `0:` line, no
-`diskNsN` children), the drive has **no partition table** — the filesystem was written
-straight onto the raw disk. macOS can't read a partition map so it never publishes a
-`/dev/diskNsN` slice node, and the app has nothing to enumerate. Confirm with:
+**Unpartitioned raw volumes / whole disks (`disk4`).** ntfsmac supports both partitioned
+drives (`diskNsM`, e.g. `disk4s1`) and unpartitioned whole-disk volumes (`disk4`, common for
+BitLocker To Go USB flash drives and raw-formatted disks) — device identifiers are validated
+against `^disk[0-9]+(s[0-9]+)?$`. When macOS shows "The disk you attached was not readable by
+this computer" because it does not recognize BitLocker, `diskutil list` shows the drive as `disk4`
+with no slice rows. ntfsmac detects and mounts the raw volume directly:
 
 ```sh
-diskutil list            # external disk with no diskNsN rows = whole-disk filesystem
-diskutil info diskN       # Whole: Yes, File System: None, Content: None = no GPT/MBR
-ls -l /dev/diskN*         # no /dev/diskNsM node = nothing to mount
+ntfsmac mount disk4
 ```
-
-Fix is on the disk, not the app: it needs a GPT partition table + a partition inside it.
-macOS can't create ext4, so repartition on a Linux machine (or a Linux live USB), back up
-the data first if it matters — the existing fs starts at offset 0 and won't line up with a
-new GPT partition (which starts at 1 MiB), so this is not a non-destructive operation:
-
-```sh
-# on a Linux box, /dev/sdX = the drive
-sudo parted /dev/sdX mklabel gpt
-sudo parted /dev/sdX mkpart primary ext4 1MiB 100%
-sudo mkfs.ext4 /dev/sdX1
-# restore your data onto /dev/sdX1, then replug on the Mac
-```
-
-After that macOS publishes `/dev/diskNsM`, the "unidentifiable" prompt (now about the
-partition, not the whole disk) is harmless — press Ignore — and `ntfsmac mount` / the GUI
-lists it. (Whole-disk NTFS drives hit the same wall; they're just usually pre-partitioned.)
 
 Filing a bug? Please include:
 

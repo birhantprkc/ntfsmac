@@ -15,7 +15,7 @@ Full spec: **`docs/dev/PLAN.md`** (architecture, phases, build steps) and **`doc
 - **NFS mount mode stays `soft`** — never switch to `hard`, it's what prevents a kernel panic on hot-unplug.
 - **Signing:** ad-hoc only (`codesign -s -`). No paid Apple Developer account, no notarization. This is why the GUI is DMG-only (never a Homebrew cask) and the CLI is a formula in the project's own tap (never homebrew-core).
 - **Every control that mounts/unmounts/touches pf/route goes through the SMJobBless XPC helper** — never a raw `sudo` shell-out from Swift UI code.
-- **Device names validated against `^disk[0-9]+s[0-9]+$`** before any shell invocation, in both CLI and GUI/helper.
+- **Device names validated against `^disk[0-9]+(s[0-9]+)?$`** before any shell invocation, in both CLI and GUI/helper (supporting sliced partitions and whole-disk volumes).
 - **Platform:** Apple Silicon only. Don't add Intel fallback paths.
 - Security and connection stability outrank speed. Speed tuning (rsize/wsize/async export) is opt-in and documented as risk, never silently defaulted on.
 

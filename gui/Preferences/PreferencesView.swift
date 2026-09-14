@@ -307,7 +307,6 @@ public struct PreferencesView: View {
             Button("Check for Updates") {
                 Task { await updater.checkForUpdates() }
             }
-            .buttonStyle(.glassNeutral(colorScheme: colorScheme))
 
         case .checking, .extracting:
             ProgressView().controlSize(.small)
@@ -316,7 +315,6 @@ public struct PreferencesView: View {
             Button("Download & Install") {
                 Task { await updater.downloadAndPrepare() }
             }
-            .buttonStyle(.glassPrimary())
 
         case .downloading(let progress):
             VStack(alignment: .trailing, spacing: 2) {
@@ -330,14 +328,12 @@ public struct PreferencesView: View {
             Button("Restart to Update") {
                 updater.restartAndApply(hasActiveMounts: hasActiveMounts)
             }
-            .buttonStyle(.glassPrimary())
             .disabled(hasActiveMounts)
 
         case .failed:
             Button("Retry") {
                 Task { await updater.checkForUpdates() }
             }
-            .buttonStyle(.glassNeutral(colorScheme: colorScheme))
         }
     }
 

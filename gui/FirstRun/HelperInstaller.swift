@@ -112,7 +112,7 @@ public struct RealHelperInstallService: HelperInstallService {
 
     public func bless(label: String) -> HelperInstallOutcome {
         let (status, authRef) = authorizationCreate()
-        guard status == errAuthorizationSuccess else {
+        guard status == errAuthorizationSuccess, let authRef else {
             switch status {
             case errAuthorizationCanceled:
                 return .denied("Authorization was cancelled.")
@@ -122,9 +122,7 @@ public struct RealHelperInstallService: HelperInstallService {
                 return .failed("Authorization request failed (status \(status)).")
             }
         }
-        if let authRef {
-            defer { authorizationFree(authRef) }
-        }
+        defer { authorizationFree(authRef) }
 
         var cfError: Unmanaged<CFError>?
         guard jobBless(kSMDomainSystemLaunchd, label as CFString, authRef, &cfError) else {

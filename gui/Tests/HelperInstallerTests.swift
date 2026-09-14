@@ -310,10 +310,64 @@ private final class BlockingInstallService: HelperInstallService, @unchecked Sen
     #expect(installer.state == .installed)
 }
 
+private final class AtomicBoolBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = false
+    var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _value }
+        set { lock.lock(); defer { lock.unlock() }; _value = newValue }
+    }
+}
+
+private final class BlessCallTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var authorizationFreed = false
+    private var jobBlessReceivedAuth: AuthorizationRef?
+    private var jobBlessCalledWhileAlive = false
+    private var isInstalledCheckedWhileAlive = false
+
+    func recordFree(_ ref: AuthorizationRef) {
+        lock.lock()
+        defer { lock.unlock() }
+        authorizationFreed = true
+    }
+
+    func recordBless(_ auth: AuthorizationRef?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        jobBlessReceivedAuth = auth
+        jobBlessCalledWhileAlive = !authorizationFreed
+        return true
+    }
+
+    func recordInstalledCheck() -> CFDictionary? {
+        lock.lock()
+        defer { lock.unlock() }
+        isInstalledCheckedWhileAlive = !authorizationFreed
+        return [:] as CFDictionary
+    }
+
+    var wasFreed: Bool {
+        lock.lock(); defer { lock.unlock() }; return authorizationFreed
+    }
+
+    var wasBlessCalledWhileAlive: Bool {
+        lock.lock(); defer { lock.unlock() }; return jobBlessCalledWhileAlive
+    }
+
+    var wasInstalledCheckedWhileAlive: Bool {
+        lock.lock(); defer { lock.unlock() }; return isInstalledCheckedWhileAlive
+    }
+
+    var receivedAuth: AuthorizationRef? {
+        lock.lock(); defer { lock.unlock() }; return jobBlessReceivedAuth
+    }
+}
+
 @MainActor
 @Test func realHelperInstallServiceFailsWhenBlessSucceedsButLaunchdDoesNotRegisterService() {
     let service = RealHelperInstallService(
-        authorizationCreate: { (errAuthorizationSuccess, nil) },
+        authorizationCreate: { (errAuthorizationSuccess, AuthorizationRef(bitPattern: 0xDEADBEEF)!) },
         authorizationFree: { _ in },
         jobBless: { _, _, _, _ in true },
         jobCopyDictionary: { _, _ in nil },
@@ -332,7 +386,7 @@ private final class BlockingInstallService: HelperInstallService, @unchecked Sen
 @MainActor
 @Test func realHelperInstallServiceSucceedsWhenBlessSucceedsAndLaunchdRegistersService() {
     let service = RealHelperInstallService(
-        authorizationCreate: { (errAuthorizationSuccess, nil) },
+        authorizationCreate: { (errAuthorizationSuccess, AuthorizationRef(bitPattern: 0xDEADBEEF)!) },
         authorizationFree: { _ in },
         jobBless: { _, _, _, _ in true },
         jobCopyDictionary: { _, _ in [:] as CFDictionary },
@@ -341,5 +395,54 @@ private final class BlockingInstallService: HelperInstallService, @unchecked Sen
     )
     let outcome = service.bless(label: "com.khr898.ntfsmac.helper")
     #expect(outcome == .installed)
+}
+
+@MainActor
+@Test func realHelperInstallServiceFailsWhenAuthorizationReferenceIsNil() {
+    let box = AtomicBoolBox()
+    let service = RealHelperInstallService(
+        authorizationCreate: { (errAuthorizationSuccess, nil) },
+        authorizationFree: { _ in },
+        jobBless: { _, _, _, _ in
+            box.value = true
+            return true
+        },
+        jobCopyDictionary: { _, _ in [:] as CFDictionary },
+        verificationPollDelayNanoseconds: 0,
+        verificationMaxAttempts: 1
+    )
+    let outcome = service.bless(label: "com.khr898.ntfsmac.helper")
+    guard case .failed = outcome else {
+        Issue.record("Expected .failed outcome when authorization reference is nil, got \(outcome)")
+        return
+    }
+    #expect(box.value == false)
+}
+
+@MainActor
+@Test func realHelperInstallServiceKeepsAuthorizationAliveUntilBlessAndVerificationComplete() {
+    let tracker = BlessCallTracker()
+
+    let service = RealHelperInstallService(
+        authorizationCreate: { (errAuthorizationSuccess, AuthorizationRef(bitPattern: 0xDEADBEEF)!) },
+        authorizationFree: { ref in
+            tracker.recordFree(ref)
+        },
+        jobBless: { _, _, auth, _ in
+            tracker.recordBless(auth)
+        },
+        jobCopyDictionary: { _, _ in
+            tracker.recordInstalledCheck()
+        },
+        verificationPollDelayNanoseconds: 0,
+        verificationMaxAttempts: 1
+    )
+
+    let outcome = service.bless(label: "com.khr898.ntfsmac.helper")
+    #expect(outcome == .installed)
+    #expect(tracker.receivedAuth == AuthorizationRef(bitPattern: 0xDEADBEEF)!)
+    #expect(tracker.wasBlessCalledWhileAlive == true)
+    #expect(tracker.wasInstalledCheckedWhileAlive == true)
+    #expect(tracker.wasFreed == true)
 }
 

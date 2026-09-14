@@ -136,6 +136,21 @@ public func resolveNtfsmacPrefix(fileManager: FileManager = .default) -> String 
     return installPrefix
 }
 
+public func resolveAnylinuxfsPath(fileManager: FileManager = .default) -> String {
+    for candidate in ntfsmacCandidatePrefixes {
+        let path = "\(candidate)/bin/anylinuxfs"
+        if fileManager.isExecutableFile(atPath: path) {
+            return path
+        }
+    }
+    for candidate in ["/opt/homebrew/bin/anylinuxfs", "/usr/local/bin/anylinuxfs"] {
+        if fileManager.isExecutableFile(atPath: candidate) {
+            return candidate
+        }
+    }
+    return "\(installPrefix)/bin/anylinuxfs"
+}
+
 public let helperMachServiceName = "com.khr898.ntfsmac.helper"
 
 public enum FsDriver: String, Codable, Sendable {

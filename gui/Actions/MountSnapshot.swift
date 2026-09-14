@@ -166,7 +166,7 @@ public struct RealMountSnapshotProvider: MountSnapshotProviding {
 
     public init(
         runner: (any PrivilegedCommandRunning)? = nil,
-        anylinuxfsPath: String = "\(installPrefix)/bin/anylinuxfs",
+        anylinuxfsPath: String = resolveAnylinuxfsPath(),
         mountPath: String = "/sbin/mount"
     ) {
         self.runner = runner

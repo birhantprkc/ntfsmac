@@ -77,7 +77,7 @@ public final class FinderOpener {
     public init(
         workspace: any WorkspaceOpening = NSWorkspace.shared,
         runner: any PrivilegedCommandRunning = RealCommandRunner(),
-        anylinuxfsPath: String = "\(installPrefix)/bin/anylinuxfs"
+        anylinuxfsPath: String = resolveAnylinuxfsPath()
     ) {
         self.workspace = workspace
         self.runner = runner

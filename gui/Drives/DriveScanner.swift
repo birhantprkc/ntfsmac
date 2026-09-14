@@ -161,7 +161,7 @@ public final class DriveScanner: ObservableObject {
 
     public init(
         runner: (any PrivilegedCommandRunning)? = nil,
-        anylinuxfsPath: String = "\(installPrefix)/bin/anylinuxfs",
+        anylinuxfsPath: String = resolveAnylinuxfsPath(),
         scanTimeout: TimeInterval = 10,
         firstRunTimeout: TimeInterval? = nil,
         cacheStateProvider: (@MainActor () -> AlpineRuntimeCacheState)? = nil,

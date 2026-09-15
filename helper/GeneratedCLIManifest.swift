@@ -2,5 +2,5 @@
 /// packaging run (and restored to the checked-in placeholder afterward). SHA-256 tree hash of
 /// Contents/Resources/cli-src/ exactly as staged for this build.
 public enum GeneratedCLIManifest {
-    public static let expectedTreeHashHex = "c196471b0254173233acc3db3b195db3f786f726a6d09c9b367f2894b86fdb34"
+    public static let expectedTreeHashHex = "fdb766cc3e8e3d218a5ae3c85fc5ad51da3a44ad3fb52bad182004a6d32c2684"
 }

@@ -19,6 +19,9 @@ are already built into the vendored kernel image.
 
 ## What's new
 
+- **In-app software updates (GUI)** — check for updates directly within the GUI Settings window, stream download progress, verify bundle integrity, and relaunch seamlessly with active-mount protection.
+- **Pre-installed Alpine runtime for instant first mount** — the installer pre-provisions and configures the Alpine Linux microVM runtime upfront, eliminating first-mount download wait times.
+- **Proactive Full Disk Access guidance** — automated FDA detection immediately guides helper permissions post-setup and in diagnostics before permission errors occur.
 - **BitLocker encrypted volume support** — mount BitLocker-encrypted Windows partitions directly from the GUI or CLI using your password or 48-digit numerical recovery key.
 - **ext2/3/4 mount support** — mount Linux ext2, ext3, and ext4 partitions the same way as
   NTFS. The guest kernel's built-in ext4 driver handles all three (blkid auto-detects the
@@ -76,7 +79,7 @@ ntfsmac help
 
 ### Mount Options
 
-- `[device]` — Partition identifier (`diskNsM`, e.g. `disk4s1`). Omit to interactively select from detected drives.
+- `[device]` — Device identifier: partition (`diskNsM`, e.g. `disk4s1`) or unpartitioned whole disk (`diskN`, e.g. `disk4`). Omit to interactively select from detected drives.
 - `[mount_point]` — Custom mount path (default: `/Volumes/<label>`).
 - `--bitlocker-credential-stdin` (or `--recovery-key-stdin`) — Reads the BitLocker password or 48-digit recovery key from stdin (never exposed in argv, process lists, or shell history).
 - `--preserve-private-relay` — Bypasses host `pfctl -E` to keep iCloud Private Relay active while still installing the `/32` endpoint host route to prevent VPN tunnel capture.
@@ -159,11 +162,11 @@ Helper**, not an unrelated package; enable that exact entry. The SMJobBless help
 executable rather than an app/resource bundle, so its icon cannot be customized independently
 without changing the privileged-helper architecture.
 
-**First mount needs network (one-time per approved runtime).** The first mount that needs a
-runtime pulls the exact Alpine Linux arm64 image identified by the tag and SHA-256 digest in
-`build/sources.lock` (~50–150 MB). It initializes a tag/digest/version-specific cache beside any
-legacy or older cache instead of replacing it. Installation, Diagnose, and opening Settings never
-download or remove a rootfs. Once the matching cache is complete, later mounts reuse it offline.
+**Pre-installed Alpine runtime (instant first mount).** Installation (`install.sh`) and GUI
+auto-staging pre-install and configure the approved Alpine Linux arm64 runtime upfront, enabling
+drives to mount instantly offline without waiting on a first-mount download. If the cache is ever
+cleared or missing, the runtime initializes automatically on first mount against the approved tag
+and SHA-256 digest pinned in `sources.lock` (~50–150 MB).
 
 **Can't write to an ext volume / `Operation not permitted`.** ext2/3/4 are real
 Unix filesystems with their own ownership bits, so ntfsmac auto-passes
@@ -182,8 +185,8 @@ If `noowners` is present but `ls`/`cp` on the mounted volume still says
 app's access to the mount point** — a privacy/TCC gate, not an NFS permission
 issue. This only affects access *from that app*:
 
-- **GUI** — the ntfsmac app needs Full Disk Access, which it prompts for on
-  first mount (`FDA_REQUIRED`). Grant it once and the GUI reads/writes fine.
+- **GUI** — the ntfsmac app proactively checks and guides Full Disk Access on initial setup
+  and launch. Grant it once in macOS System Settings and the GUI reads/writes without issue.
 - **CLI** — Terminal needs Full Disk Access **only if you want to write from
   the Terminal** (e.g. `cp`, `tee`, shell redirects into `/Volumes/<vol>`).
   With Terminal FDA off, the mount is still writable — Finder and other
@@ -207,7 +210,7 @@ Filing a bug? Please include:
 
 - the `ntfsmac diagnose --json` output, or the JSON file saved with **⌘-click Diagnose** in the GUI,
 - your macOS version (`sw_vers -productVersion`) and Mac model,
-- the disk identifier you used, in `diskNsN` form (e.g. `disk4s1` — a partition, not the whole `disk4`).
+- the disk identifier you used, in `diskNsM` or `diskN` form (e.g. `disk4s1`, or unpartitioned `disk4`).
 
 For security issues, see [SECURITY.md](SECURITY.md) — please don't file those publicly.
 
@@ -216,6 +219,9 @@ For security issues, see [SECURITY.md](SECURITY.md) — please don't file those 
 Menu-bar app (no Dock icon): pick a drive, mount it, get out of the way. Menu-bar icon color
 tells the whole story — grey idle, blue mounting, green mounted read/write, yellow mounted
 read-only (dirty journal), red error. Full button-level spec in [GUI-PLAN.md](docs/dev/GUI-PLAN.md).
+
+Includes in-app software updates (Settings → Check for Updates), BitLocker unlock dialogs,
+proactive Full Disk Access guidance, and real-time per-drive throughput monitors.
 
 <div align="center">
   <table>

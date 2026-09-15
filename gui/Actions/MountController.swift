@@ -318,6 +318,8 @@ public final class MountController: ObservableObject {
                 if result.output.contains("BITLOCKER_CREDENTIAL_REQUIRED") {
                     credentialRequiredDeviceID = drive.identifier
                     recomputeAggregateState()
+                } else if recoveryKey != nil || Self.isBitLockerCredentialError(result.output) {
+                    fail("Wrong password or recovery key.")
                 } else {
                     fail(result.output)
                 }
@@ -449,11 +451,26 @@ public final class MountController: ObservableObject {
         }
     }
 
+    static func isBitLockerCredentialError(_ output: String) -> Bool {
+        let lower = output.lowercased()
+        return lower.contains("no key available")
+            || lower.contains("key slot")
+            || lower.contains("passphrase")
+            || lower.contains("passkey")
+            || lower.contains("password")
+            || lower.contains("recovery key")
+            || lower.contains("bitlk")
+            || lower.contains("invalid or empty bitlocker")
+            || lower.contains("failed to open bitlocker")
+    }
+
     private func fail(_ message: String) {
         // A failed mount/unmount while other drives are still mounted must not flip the icon to
         // `.error` and hide the "mounted" indicator — only go `.error` when nothing is mounted.
         if message.contains("Insufficient permissions?") || message.contains("Cannot probe") {
             errorMessage = "FDA_REQUIRED"
+        } else if Self.isBitLockerCredentialError(message) {
+            errorMessage = "Wrong password or recovery key."
         } else {
             errorMessage = message
         }

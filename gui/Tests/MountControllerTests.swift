@@ -271,3 +271,37 @@ private struct FakeReadOnlyChecker: MountReadOnlyChecking {
     #expect(description.contains("System Settings"))
     #expect(description.contains("ntfsmac diagnose"))
 }
+
+@MainActor
+@Test func mountTranslatesBitLockerWrongPasskeyToConciseErrorMessage() async {
+    let fake = FakeHelper()
+    fake.mountResult = .success(CommandResult(
+        output: "cryptsetup failed: No key available with this passphrase.\ncommand failed with status: 2",
+        exitCode: 1
+    ))
+    let appState = AppState()
+    let controller = MountController(helper: fake, readOnlyChecker: FakeReadOnlyChecker(isReadOnly: false), appState: appState)
+    let drive = Drive(identifier: "disk7s1", fsType: "BitLocker", label: "Secret", size: "128.0 GB")
+
+    await controller.mount(drive, recoveryKey: "wrong-key")
+
+    #expect(controller.errorMessage == "Wrong password or recovery key.")
+    #expect(appState.state == .error)
+}
+
+@MainActor
+@Test func mountTranslatesBitLockerKeySlotErrorWithoutRecoveryKeyToConciseErrorMessage() async {
+    let fake = FakeHelper()
+    fake.mountResult = .success(CommandResult(
+        output: "Failed to open BitLocker device: Key slot open failed.",
+        exitCode: 1
+    ))
+    let appState = AppState()
+    let controller = MountController(helper: fake, readOnlyChecker: FakeReadOnlyChecker(isReadOnly: false), appState: appState)
+    let drive = Drive(identifier: "disk7s1", fsType: "BitLocker", label: "Secret", size: "128.0 GB")
+
+    await controller.mount(drive)
+
+    #expect(controller.errorMessage == "Wrong password or recovery key.")
+    #expect(appState.state == .error)
+}

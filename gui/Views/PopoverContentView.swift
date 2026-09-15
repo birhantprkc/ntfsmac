@@ -206,8 +206,23 @@ public struct PopoverContentView: View {
                 showFDAPrompt = true
             }
         }
+        .onChange(of: helperInstaller.state) { newState in
+            if newState == .installed {
+                hasShownInitialFDAPrompt = false
+                Task {
+                    cliAutoStager.reset()
+                    await cliAutoStager.stageIfNeeded()
+                    cliInstallChecker.check()
+                    let hasFDA = (try? await helperClient.checkFDA()) ?? false
+                    if !hasFDA {
+                        showFDAPrompt = true
+                        hasShownInitialFDAPrompt = true
+                    }
+                }
+            }
+        }
         .onChange(of: cliInstallChecker.isInstalled) { installed in
-            if installed && !hasShownInitialFDAPrompt {
+            if installed {
                 Task {
                     let hasFDA = (try? await helperClient.checkFDA()) ?? false
                     if !hasFDA {
@@ -369,7 +384,11 @@ public struct PopoverContentView: View {
             }
 
             if let errorMessage = mountController.errorMessage ?? remountController.errorMessage, errorMessage != "FDA_REQUIRED" {
-                Text(errorMessage).font(.caption).foregroundStyle(Color.ntfsRed)
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(Color.ntfsRed)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if let warning = mountController.reconciliationWarning {

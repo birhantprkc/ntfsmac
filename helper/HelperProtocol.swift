@@ -13,8 +13,13 @@ import CryptoKit
 /// Accepts "diskNsM" (e.g. disk2s1) or "diskN" (e.g. disk4 for unpartitioned BitLocker/NTFS).
 public let deviceNamePattern = "^disk[0-9]+(s[0-9]+)?$"
 
+private let precompiledDeviceRegex: NSRegularExpression = {
+    try! NSRegularExpression(pattern: deviceNamePattern)
+}()
+
 public func validateDevice(_ device: String) -> Bool {
-    device.range(of: deviceNamePattern, options: .regularExpression) != nil
+    let range = NSRange(location: 0, length: device.utf16.count)
+    return precompiledDeviceRegex.firstMatch(in: device, options: [], range: range) != nil
 }
 
 /// Shared `/Volumes/`-rooted path shape check: non-traversal, and — security review finding
@@ -250,6 +255,9 @@ public struct CommandResult: Codable, Sendable {
     /// Distinct from `uninstallHelper` (which un-blesses + bootouts the launchd job for removal);
     /// this leaves registration intact so the next app launch re-uses the same blessed helper.
     func exitHelper(reply: @escaping (Data?, String?) -> Void)
+
+    /// Tests Full Disk Access (FDA) by attempting to open raw disk device /dev/rdisk0 read-only.
+    func checkFDA(reply: @escaping (Bool) -> Void)
 }
 
 /// Seam for `HelperService` so unit tests can assert on the exact argv built for a request
@@ -257,27 +265,13 @@ public struct CommandResult: Codable, Sendable {
 /// production implementation.
 public protocol PrivilegedCommandRunning {
     func run(_ executablePath: String, _ arguments: [String]) -> CommandResult
+    func run(_ executablePath: String, _ arguments: [String], timeout: TimeInterval) -> CommandResult
     func runPipingStdin(_ input: String, to executablePath: String, _ arguments: [String]) -> CommandResult
 }
 
-/// Lock-protected single-value holder — lets `captureOutput`'s two background readers each
-/// write their own result without Swift 6 strict concurrency flagging a shared captured `var`
-/// as a data race (the two boxes below are never touched by more than one thread at a time in
-/// practice, but the type system can't see that through a plain closure capture).
-private final class DataBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = Data()
-
-    func set(_ data: Data) {
-        lock.lock()
-        value = data
-        lock.unlock()
-    }
-
-    func get() -> Data {
-        lock.lock()
-        defer { lock.unlock() }
-        return value
+extension PrivilegedCommandRunning {
+    public func run(_ executablePath: String, _ arguments: [String], timeout: TimeInterval) -> CommandResult {
+        run(executablePath, arguments)
     }
 }
 
@@ -286,33 +280,6 @@ public struct RealCommandRunner: PrivilegedCommandRunning {
 
     public init() {}
 
-    /// Drains both pipes concurrently on background queues, started *before* `waitUntilExit()`
-    /// — reading them sequentially afterward (the previous shape of this code) deadlocks the
-    /// instant combined stdout+stderr exceeds the ~64KB pipe buffer: the child blocks writing to
-    /// a full pipe nobody is draining yet, while this thread blocks in `waitUntilExit()` waiting
-    /// for a child that itself is blocked. Apple's own `Process`/`Pipe` docs call this out
-    /// explicitly. Every command run through here so far produced small enough output to never
-    /// hit it — `HelperService.stageCLI`'s `install.sh` (several file copies + `codesign`/`xattr`
-    /// calls per binary) was the first real trigger.
-    private func captureOutput(_ process: Process, _ outPipe: Pipe, _ errPipe: Pipe) -> String {
-        let outBox = DataBox()
-        let errBox = DataBox()
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            outBox.set(outPipe.fileHandleForReading.readDataToEndOfFile())
-            group.leave()
-        }
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            errBox.set(errPipe.fileHandleForReading.readDataToEndOfFile())
-            group.leave()
-        }
-        process.waitUntilExit()
-        group.wait()
-        return (String(data: outBox.get(), encoding: .utf8) ?? "") + (String(data: errBox.get(), encoding: .utf8) ?? "")
-    }
-
     private func configureEnvironment(for process: Process) {
         var env = ProcessInfo.processInfo.environment
         if let connection = NSXPCConnection.current() {
@@ -320,8 +287,16 @@ public struct RealCommandRunner: PrivilegedCommandRunning {
             let gid = connection.effectiveGroupIdentifier
             env["SUDO_UID"] = String(uid)
             env["SUDO_GID"] = String(gid)
-            if let pw = getpwuid(uid), let dir = pw.pointee.pw_dir {
-                env["HOME"] = String(cString: dir)
+            if let pw = getpwuid(uid) {
+                if let dir = pw.pointee.pw_dir {
+                    env["HOME"] = String(cString: dir)
+                }
+                if let name = pw.pointee.pw_name {
+                    let username = String(cString: name)
+                    env["SUDO_USER"] = username
+                    env["USER"] = username
+                    env["LOGNAME"] = username
+                }
             }
         }
         if let home = env["HOME"] {
@@ -341,18 +316,30 @@ public struct RealCommandRunner: PrivilegedCommandRunning {
         process.arguments = arguments
         configureEnvironment(for: process)
 
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ntfsmac-command-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: outputURL.path, contents: nil),
+              let outputHandle = try? FileHandle(forWritingTo: outputURL)
+        else {
+            return CommandResult(output: "helper: failed to create command output file", exitCode: -1)
+        }
+        defer {
+            try? outputHandle.close()
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+        process.standardOutput = outputHandle
+        process.standardError = outputHandle
 
         do {
             try process.run()
         } catch {
             return CommandResult(output: "helper: failed to launch \(executablePath): \(error)", exitCode: -1)
         }
-        let combined = captureOutput(process, outPipe, errPipe)
-        return CommandResult(output: combined, exitCode: process.terminationStatus)
+
+        process.waitUntilExit()
+        try? outputHandle.synchronize()
+        let output = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? ""
+        return CommandResult(output: output, exitCode: process.terminationStatus)
     }
 
     /// Runs an unprivileged or otherwise bounded command. The protocol requirement above stays
@@ -408,7 +395,7 @@ public struct RealCommandRunner: PrivilegedCommandRunning {
                 if process.isRunning {
                     _ = Darwin.kill(process.processIdentifier, SIGKILL)
                 }
-                processGroup.wait()
+                _ = processGroup.wait(timeout: .now() + .milliseconds(250))
             }
         }
 
@@ -427,12 +414,22 @@ public struct RealCommandRunner: PrivilegedCommandRunning {
         process.arguments = arguments
         configureEnvironment(for: process)
 
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ntfsmac-command-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: outputURL.path, contents: nil),
+              let outputHandle = try? FileHandle(forWritingTo: outputURL)
+        else {
+            return CommandResult(output: "helper: failed to create command output file", exitCode: -1)
+        }
+        defer {
+            try? outputHandle.close()
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
         let inPipe = Pipe()
-        let outPipe = Pipe()
-        let errPipe = Pipe()
         process.standardInput = inPipe
-        process.standardOutput = outPipe
-        process.standardError = errPipe
+        process.standardOutput = outputHandle
+        process.standardError = outputHandle
 
         do {
             try process.run()
@@ -441,8 +438,10 @@ public struct RealCommandRunner: PrivilegedCommandRunning {
         }
         inPipe.fileHandleForWriting.write(input.data(using: .utf8) ?? Data())
         inPipe.fileHandleForWriting.closeFile()
-        let combined = captureOutput(process, outPipe, errPipe)
-        return CommandResult(output: combined, exitCode: process.terminationStatus)
+        process.waitUntilExit()
+        try? outputHandle.synchronize()
+        let output = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? ""
+        return CommandResult(output: output, exitCode: process.terminationStatus)
     }
 }
 
@@ -458,6 +457,7 @@ public final class HelperService: NSObject, HelperXPCProtocol {
     private let resolvePrefix: @Sendable () -> String
     private let expectedCLITreeHash: String
     private let exitSink: @Sendable () -> Void
+    private let fdaCheck: (@Sendable () -> Bool)?
 
     /// `ntfsmacPrefix`, when passed (tests only), pins the CLI location instead of resolving it
     /// live. Production always passes `nil` so every privileged call below re-runs
@@ -478,7 +478,8 @@ public final class HelperService: NSObject, HelperXPCProtocol {
         runner: PrivilegedCommandRunning,
         ntfsmacPrefix: String? = nil,
         expectedCLITreeHash: String = GeneratedCLIManifest.expectedTreeHashHex,
-        exitSink: @Sendable @escaping () -> Void = { exit(0) }
+        exitSink: @Sendable @escaping () -> Void = { exit(0) },
+        fdaCheck: (@Sendable () -> Bool)? = nil
     ) {
         self.runner = runner
         if let ntfsmacPrefix {
@@ -488,6 +489,7 @@ public final class HelperService: NSObject, HelperXPCProtocol {
         }
         self.expectedCLITreeHash = expectedCLITreeHash
         self.exitSink = exitSink
+        self.fdaCheck = fdaCheck
     }
 
     private func encode(_ result: CommandResult, reply: (Data?, String?) -> Void) {
@@ -690,8 +692,8 @@ public final class HelperService: NSObject, HelperXPCProtocol {
             reply(nil, "rejected: anylinuxfs not found or not executable at \(anylinuxfs)")
             return
         }
-        let microsoft = runner.run(anylinuxfs, ["list", "--microsoft"])
-        let linux = runner.run(anylinuxfs, ["list", "--linux"])
+        let microsoft = runner.run(anylinuxfs, ["list", "--microsoft"], timeout: 10.0)
+        let linux = runner.run(anylinuxfs, ["list", "--linux"], timeout: 10.0)
         let exitCode: Int32
         let combinedOutput: String
         if microsoft.exitCode == 0 || linux.exitCode == 0 {
@@ -705,6 +707,26 @@ public final class HelperService: NSObject, HelperXPCProtocol {
             combinedOutput = [microsoft.output, linux.output].filter { !$0.isEmpty }.joined(separator: "\n")
         }
         encode(CommandResult(output: combinedOutput, exitCode: exitCode), reply: reply)
+    }
+
+    public func checkFDA(reply: @escaping (Bool) -> Void) {
+        if let check = fdaCheck {
+            reply(check())
+            return
+        }
+        let fd = Darwin.open("/dev/rdisk0", O_RDONLY)
+        if fd >= 0 {
+            Darwin.close(fd)
+            reply(true)
+        } else {
+            let fallbackFd = Darwin.open("/dev/disk0", O_RDONLY)
+            if fallbackFd >= 0 {
+                Darwin.close(fallbackFd)
+                reply(true)
+            } else {
+                reply(false)
+            }
+        }
     }
 
     public func uninstallHelper(reply: @escaping (Data?, String?) -> Void) {

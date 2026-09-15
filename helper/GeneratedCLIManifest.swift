@@ -2,5 +2,5 @@
 /// packaging run (and restored to the checked-in placeholder afterward). SHA-256 tree hash of
 /// Contents/Resources/cli-src/ exactly as staged for this build.
 public enum GeneratedCLIManifest {
-    public static let expectedTreeHashHex = "UNSET-PLACEHOLDER-REGENERATE-VIA-build-package-app-sh"
+    public static let expectedTreeHashHex = "c196471b0254173233acc3db3b195db3f786f726a6d09c9b367f2894b86fdb34"
 }

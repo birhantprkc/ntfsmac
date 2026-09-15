@@ -197,4 +197,18 @@ public final class HelperClient: Sendable {
             }
         }
     }
+
+    public nonisolated func checkFDA() async throws -> Bool {
+        try await withCheckedThrowingContinuation { continuation in
+            guard let proxy = currentConnection().remoteObjectProxyWithErrorHandler({ error in
+                continuation.resume(throwing: HelperClientError.helper(error.localizedDescription))
+            }) as? HelperXPCProtocol else {
+                continuation.resume(throwing: HelperClientError.proxyUnavailable)
+                return
+            }
+            proxy.checkFDA { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
 }

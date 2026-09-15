@@ -250,14 +250,14 @@ public final class DiagnoseRunner: ObservableObject {
     }
 
     public func run() async {
-        _ = execute()
+        _ = await execute()
     }
 
     /// Runs the exact same read-only CLI diagnostic as the visible summary, then returns a
     /// validated, formatted attachment. A degraded diagnosis still produces a useful document:
     /// `diagnose.sh` deliberately uses its exit code for health while keeping stdout valid JSON.
     public func runForDeveloperExport() async -> DeveloperDiagnoseDocument? {
-        guard let rawJSON = execute() else { return nil }
+        guard let rawJSON = await execute() else { return nil }
         do {
             return try DeveloperDiagnoseDocument(rawJSON: rawJSON)
         } catch {
@@ -267,7 +267,7 @@ public final class DiagnoseRunner: ObservableObject {
         }
     }
 
-    private func execute() -> String? {
+    private func execute() async -> String? {
         guard !isRunning else { return nil }
         isRunning = true
         // Clear the previous result up front — otherwise a stale report/error stays on screen
@@ -289,7 +289,16 @@ public final class DiagnoseRunner: ObservableObject {
             return nil
         }
 
-        let result = runner.run(ntfsmacPath, ["diagnose", "--json"])
+        let result: CommandResult
+        if runner is RealCommandRunner {
+            let path = ntfsmacPath
+            result = await Task.detached(priority: .userInitiated) {
+                RealCommandRunner().run(path, ["diagnose", "--json"])
+            }.value
+        } else {
+            result = runner.run(ntfsmacPath, ["diagnose", "--json"])
+        }
+
         guard let data = result.output.data(using: .utf8),
               let parsed = try? JSONDecoder().decode(DiagnoseReport.self, from: data)
         else {

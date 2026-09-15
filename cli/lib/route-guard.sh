@@ -24,21 +24,31 @@ route_guard_valid_endpoint() {
 }
 
 route_guard_interface_for() {
-  local endpoint="$1" interface
+  local endpoint="$1" interface route_out line
   interface="${NTFSMAC_ROUTE_GUARD_INTERFACE_OVERRIDE-}"
   if [[ -z "$interface" ]]; then
-    interface="$("$ROUTE_GUARD_ROUTE_BIN" -n get "$endpoint" 2>/dev/null \
-      | awk '/interface:/{print $2; exit}')"
+    route_out="$("$ROUTE_GUARD_ROUTE_BIN" -n get "$endpoint" 2>/dev/null || true)"
+    while IFS= read -r line; do
+      if [[ "$line" =~ interface:[[:space:]]*([^[:space:]]+) ]]; then
+        interface="${BASH_REMATCH[1]}"
+        break
+      fi
+    done <<< "$route_out"
   fi
   printf '%s\n' "$interface"
 }
 
 route_guard_default_interface() {
-  local interface
+  local interface route_out line
   interface="${NTFSMAC_DEFAULT_INTERFACE_OVERRIDE-}"
   if [[ -z "$interface" ]]; then
-    interface="$("$ROUTE_GUARD_ROUTE_BIN" -n get default 2>/dev/null \
-      | awk '/interface:/{print $2; exit}')"
+    route_out="$("$ROUTE_GUARD_ROUTE_BIN" -n get default 2>/dev/null || true)"
+    while IFS= read -r line; do
+      if [[ "$line" =~ interface:[[:space:]]*([^[:space:]]+) ]]; then
+        interface="${BASH_REMATCH[1]}"
+        break
+      fi
+    done <<< "$route_out"
   fi
   printf '%s\n' "$interface"
 }

@@ -131,13 +131,15 @@ cmd_mount() {
     local -a idents=() fstypes=() menu_lines=()
     local ident label size fstype rest
     local drives_tmp
-    drives_tmp="$(mktemp)"
+    drives_tmp="$(mktemp)" || return 1
+    trap 'rm -f -- "$drives_tmp"' INT TERM
     # Real exit status, not process substitution: list_mountable_drives() returns 1 (with its
     # own clear "no response" message already printed) on a backend timeout — that must short-
     # circuit here, not fall through to the generic "no compatible drives found" below, which
     # would misreport a wedged backend as an empty drive list.
     if ! list_mountable_drives > "$drives_tmp"; then
       rm -f "$drives_tmp"
+      trap - INT TERM
       return 1
     fi
     # Split on tab manually, NOT `IFS=$'\t' read`: tab is a whitespace IFS char, so `read`
@@ -158,6 +160,7 @@ cmd_mount() {
       menu_lines+=("/dev/$ident  $label  $size  $fstype")
     done < "$drives_tmp"
     rm -f "$drives_tmp"
+    trap - INT TERM
 
     if [[ ${#idents[@]} -eq 0 ]]; then
       echo "mount: no compatible drives found (plug one in, or pass a device explicitly)" >&2
@@ -199,14 +202,17 @@ cmd_mount() {
   if [[ -n "$credential_required_error" && -z "$recovery_key_stdin" && -n "$ANYLINUXFS_BIN" ]]; then
     local probe_output="" probe_tmp=""
     probe_tmp="$(mktemp)" || return 1
+    trap 'rm -f -- "$probe_tmp"' INT TERM
     if ! run_with_progress "${NTFSMAC_LIST_TIMEOUT:-20}" 5 "mount: probing encryption" "$probe_tmp" \
       "$ANYLINUXFS_BIN" list --microsoft; then
       rm -f "$probe_tmp"
+      trap - INT TERM
       echo "BITLOCKER_PROBE_FAILED: could not safely determine whether $device is encrypted; retry after the current scan finishes" >&2
       return 1
     fi
     probe_output="$(<"$probe_tmp")"
     rm -f "$probe_tmp"
+    trap - INT TERM
     if printf '%s\n' "$probe_output" | awk -v dev="$device" '$NF == dev && $0 ~ /BitLocker/ { found=1 } END { exit !found }'; then
       echo "BITLOCKER_CREDENTIAL_REQUIRED: $device requires a password or recovery key" >&2
       return 1
@@ -247,13 +253,15 @@ cmd_mount() {
       is_bitlocker=1
     elif [[ -n "$ANYLINUXFS_BIN" ]]; then
       local probe_tmp
-      probe_tmp="$(mktemp)"
+      probe_tmp="$(mktemp)" || return 1
+      trap 'rm -f -- "$probe_tmp"' INT TERM
       if run_with_progress "${NTFSMAC_LIST_TIMEOUT:-20}" 5 "mount: probing encryption" "$probe_tmp" "$ANYLINUXFS_BIN" list --microsoft 2>/dev/null; then
         if awk -v dev="$device" '$NF == dev && $0 ~ /BitLocker/ { found=1 } END { exit !found }' "$probe_tmp"; then
           is_bitlocker=1
         fi
       fi
       rm -f "$probe_tmp"
+      trap - INT TERM
     fi
     if [[ "$is_bitlocker" -eq 1 ]]; then
       local entered_key=""

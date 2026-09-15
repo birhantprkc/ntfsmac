@@ -172,6 +172,99 @@ link_into_path() {
   fi
 }
 
+resolve_target_user() {
+  if [[ -n "${NTFSMAC_TARGET_USER:-}" ]]; then
+    printf '%s\n' "$NTFSMAC_TARGET_USER"
+    return 0
+  fi
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    printf '%s\n' "$SUDO_USER"
+    return 0
+  fi
+  local console_user
+  console_user="$(stat -f '%Su' /dev/console 2>/dev/null || true)"
+  if [[ -n "$console_user" && "$console_user" != "root" ]]; then
+    printf '%s\n' "$console_user"
+    return 0
+  fi
+  id -un 2>/dev/null || whoami 2>/dev/null || echo "root"
+}
+
+resolve_target_home() {
+  local target_user="${1:-}"
+  if [[ -n "${NTFSMAC_TARGET_HOME:-}" ]]; then
+    printf '%s\n' "$NTFSMAC_TARGET_HOME"
+    return 0
+  fi
+  if [[ -n "$target_user" && "$target_user" != "root" ]]; then
+    local home_dir
+    home_dir="$(dscl . -read "/Users/$target_user" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory:[[:space:]]*//p' || true)"
+    if [[ -n "$home_dir" && -d "$home_dir" ]]; then
+      printf '%s\n' "$home_dir"
+      return 0
+    fi
+    if [[ -d "/Users/$target_user" ]]; then
+      printf '/Users/%s\n' "$target_user"
+      return 0
+    fi
+  fi
+  if [[ -n "${HOME:-}" ]]; then
+    printf '%s\n' "$HOME"
+    return 0
+  fi
+  cd ~ 2>/dev/null && pwd || echo "/var/root"
+}
+
+wipe_anylinuxfs_store() {
+  local target_home="${1:-}"
+  if mount -t nfs 2>/dev/null | grep -q .; then
+    echo "install.sh: WARN — active NFS mount detected; refusing to wipe anylinuxfs store to prevent corruption" >&2
+    return 0
+  fi
+
+  if [[ -n "$target_home" && -d "$target_home/.anylinuxfs" ]]; then
+    rm -rf "$target_home"/.anylinuxfs/alpine-* "$target_home"/.anylinuxfs/*.preserved-* 2>/dev/null || true
+  fi
+
+  if [[ -d "/var/root/.anylinuxfs" ]]; then
+    rm -rf "/var/root/.anylinuxfs" 2>/dev/null || true
+  fi
+  return 0
+}
+
+setup_alpine_environment() {
+  if [[ "${NTFSMAC_SKIP_RUNTIME_INIT:-}" == "1" ]]; then
+    return 0
+  fi
+
+  local target_user="${1:-}"
+  local target_home="${2:-}"
+
+  echo "install.sh: setting up microVM environment and installing Alpine runtime (takes ~1-2 min)..."
+
+  local target_uid target_gid
+  target_uid="$(id -u "$target_user" 2>/dev/null || echo "501")"
+  target_gid="$(id -g "$target_user" 2>/dev/null || echo "20")"
+
+  local anylinuxfs_bin="${NTFSMAC_ANYLINUXFS_BIN:-$PREFIX/bin/anylinuxfs}"
+  if [[ -x "$anylinuxfs_bin" ]]; then
+    SUDO_USER="$target_user" \
+    SUDO_UID="$target_uid" \
+    SUDO_GID="$target_gid" \
+    HOME="$target_home" \
+    "$anylinuxfs_bin" init || {
+      echo "install.sh: WARN — anylinuxfs init encountered an issue (runtime will initialize on first mount)" >&2
+      return 0
+    }
+  fi
+
+  if [[ -n "$target_home" && -d "$target_home/.anylinuxfs" ]]; then
+    chown -R "$target_user" "$target_home/.anylinuxfs" 2>/dev/null || true
+  fi
+
+  echo "install.sh: environment setup complete — Alpine Linux runtime is ready."
+}
+
 main() {
   # Self-elevate only if actually needed — mirrors mount.sh/uninstall.sh's own pattern, but
   # gated on real writability so a machine where $PREFIX/$PATH_SYMLINK's parent is already
@@ -201,6 +294,14 @@ main() {
   install_binaries || exit 1
   install_cli || exit 1
   [[ -z "$skip_link" ]] && link_into_path
+
+  local target_user target_home
+  target_user="$(resolve_target_user)"
+  target_home="$(resolve_target_home "$target_user")"
+
+  wipe_anylinuxfs_store "$target_home"
+  setup_alpine_environment "$target_user" "$target_home"
+
   echo "install.sh: installed to $PREFIX (NTFSMAC_REPO=$NTFSMAC_REPO)"
 }
 

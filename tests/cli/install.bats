@@ -14,6 +14,7 @@ setup() {
   SYMLINK_DIR="$(mktemp -d)/bin"
   export NTFSMAC_PATH_SYMLINK="$SYMLINK_DIR/ntfsmac"
   export NTFSMAC_SKIP_ROOT_CHECK=1
+  export NTFSMAC_SKIP_RUNTIME_INIT=1
   export NTFSMAC_RUNTIME_HOME_OVERRIDE="$PREFIX_DIR/runtime-home"
   EXPECTED_RELEASE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$REPO_ROOT/gui/Info.plist")"
   EXPECTED_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$REPO_ROOT/gui/Info.plist")"
@@ -177,4 +178,63 @@ STUB
   [ "$status" -ne 0 ]
   [[ "$output" == *"unknown command"* ]]
   [[ "$output" == *"commands:"* ]]
+}
+
+@test "wipe_anylinuxfs_store removes stale alpine caches in target home" {
+  local fake_home="$PREFIX_DIR/fakeuser_home"
+  mkdir -p "$fake_home/.anylinuxfs/alpine-old-123" "$fake_home/.anylinuxfs/alpine.preserved-456"
+  [ -d "$fake_home/.anylinuxfs/alpine-old-123" ]
+  [ -d "$fake_home/.anylinuxfs/alpine.preserved-456" ]
+
+  NTFSMAC_TARGET_USER="testuser" NTFSMAC_TARGET_HOME="$fake_home" run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ ! -d "$fake_home/.anylinuxfs/alpine-old-123" ]
+  [ ! -d "$fake_home/.anylinuxfs/alpine.preserved-456" ]
+}
+
+@test "wipe_anylinuxfs_store refuses to wipe cache when NFS mount is active" {
+  local fake_home="$PREFIX_DIR/fakeuser_home"
+  mkdir -p "$fake_home/.anylinuxfs/alpine-old-123"
+  local stub_dir
+  stub_dir="$(mktemp -d)"
+  cat > "$stub_dir/mount" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"-t nfs"* ]]; then
+  echo "192.168.64.2:/export on /Volumes/MyShare (nfs)"
+  exit 0
+fi
+exit 0
+STUB
+  chmod +x "$stub_dir/mount"
+
+  PATH="$stub_dir:$PATH" NTFSMAC_TARGET_USER="testuser" NTFSMAC_TARGET_HOME="$fake_home" run "$SCRIPT"
+  rm -rf "$stub_dir"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"active NFS mount detected"* ]]
+  [ -d "$fake_home/.anylinuxfs/alpine-old-123" ]
+}
+
+@test "setup_alpine_environment contract executes anylinuxfs init and announces readiness" {
+  local fake_home="$PREFIX_DIR/fakeuser_home"
+  mkdir -p "$fake_home"
+  local stub_bin
+  stub_bin="$(mktemp -d)/anylinuxfs"
+  cat > "$stub_bin" <<'STUB'
+#!/bin/bash
+if [[ "$1" == "init" ]]; then
+  echo "STUB_INIT: SUDO_USER=$SUDO_USER HOME=$HOME"
+  exit 0
+fi
+echo "anylinuxfs 0.18.0"
+exit 0
+STUB
+  chmod +x "$stub_bin"
+
+  export NTFSMAC_SKIP_RUNTIME_INIT=0
+  export NTFSMAC_ANYLINUXFS_BIN="$stub_bin"
+  NTFSMAC_TARGET_USER="testuser" NTFSMAC_TARGET_HOME="$fake_home" run "$SCRIPT"
+  rm -rf "$(dirname "$stub_bin")"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"setting up microVM environment and installing Alpine runtime"* ]]
+  [[ "$output" == *"environment setup complete — Alpine Linux runtime is ready."* ]]
 }

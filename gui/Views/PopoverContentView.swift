@@ -77,6 +77,7 @@ public struct PopoverContentView: View {
     @State private var diagnosePresentation = DiagnosePanelPresentation()
     @State private var securityPresentation = SecurityIndicatorsPresentation()
     @State private var showFDAPrompt = false
+    @AppStorage("com.khr898.ntfsmac.hasShownInitialFDAPrompt") private var hasShownInitialFDAPrompt = false
     @State private var bitLockerDrive: Drive?
     @State private var bitLockerRecoveryKey = ""
 
@@ -205,10 +206,54 @@ public struct PopoverContentView: View {
                 showFDAPrompt = true
             }
         }
+        .onChange(of: cliInstallChecker.isInstalled) { installed in
+            if installed && !hasShownInitialFDAPrompt {
+                Task {
+                    let hasFDA = (try? await helperClient.checkFDA()) ?? false
+                    if !hasFDA {
+                        showFDAPrompt = true
+                        hasShownInitialFDAPrompt = true
+                    }
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .ntfsmacOpenSettings)) { _ in
             navigation.showSettings()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard helperInstaller.state == .installed else { return }
+            Task {
+                let hasFDA = (try? await helperClient.checkFDA()) ?? false
+                if hasFDA {
+                    if showFDAPrompt {
+                        showFDAPrompt = false
+                    }
+                } else if !hasShownInitialFDAPrompt {
+                    showFDAPrompt = true
+                    hasShownInitialFDAPrompt = true
+                }
+            }
+        }
+        .onAppear {
+            driveScanner.setPopoverVisible(true)
+            mountController.setPopoverVisible(true)
+            driveScanner.hasActiveMounts = !mountController.mountedDrives.isEmpty
+        }
+        .onDisappear {
+            driveScanner.setPopoverVisible(false)
+            mountController.setPopoverVisible(false)
+        }
+        .onChange(of: mountController.mountedDrives.isEmpty) { isEmpty in
+            driveScanner.hasActiveMounts = !isEmpty
+        }
         .task {
+            if helperInstaller.state == .installed && !hasShownInitialFDAPrompt {
+                let hasFDA = (try? await helperClient.checkFDA()) ?? false
+                if !hasFDA {
+                    showFDAPrompt = true
+                    hasShownInitialFDAPrompt = true
+                }
+            }
             await refreshAll()
         }
     }
@@ -241,7 +286,7 @@ public struct PopoverContentView: View {
                 }
             }
 
-            if driveScanner.isInitializingRuntime {
+            if cliAutoStager.isStaging || driveScanner.isInitializingRuntime {
                 microVMSetupView
             } else {
                 // Before anything is mounted: the detected drives are the primary list, not "other" —

@@ -88,7 +88,9 @@ run_anylinuxfs_mount() {
   # Upgrades use a versioned directory; legacy, mismatched, and interrupted caches are preserved
   # side-by-side so a mount never silently destroys rollback data.
   load_runtime_alpine_contract || return 1
-  runtime_alpine_prepare_cache "$HOME" || return 1
+  local runtime_home
+  runtime_home="$(runtime_alpine_resolve_home)"
+  runtime_alpine_prepare_cache "$runtime_home" || return 1
 
   # Auto-eject: if macOS already auto-mounted this partition with its own (read-only) NTFS
   # driver, the raw block device is held and anylinuxfs/ntfs-3g can't probe it ("Insufficient
@@ -143,7 +145,7 @@ run_anylinuxfs_mount() {
       sleep 0.5
     done
 
-    run_with_progress "${NTFSMAC_MOUNT_TIMEOUT:-240}" 15 "mount" - \
+    HOME="$runtime_home" run_with_progress "${NTFSMAC_MOUNT_TIMEOUT:-240}" 15 "mount" - \
       "$ANYLINUXFS_BIN" "${args[@]}" &
     mount_job=$!
     if [[ "$security_prepare_available" == "1" ]]; then

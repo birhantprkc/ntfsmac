@@ -76,7 +76,8 @@ public enum DriveListParser {
 
         let (fsType, label) = deriveFsTypeAndLabel(blob)
         guard allowedFsTypes.contains(fsType) else { return nil }
-        return Drive(identifier: ident, fsType: fsType, label: label, size: size)
+        let cleanSize = size.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "*", with: "")
+        return Drive(identifier: ident, fsType: fsType, label: label, size: cleanSize)
     }
 
     /// Splits the TYPE+NAME blob into (fstype, label). "Microsoft Basic Data" is the GPT type
@@ -153,6 +154,8 @@ public final class DriveScanner: ObservableObject {
     @Published public private(set) var drives: [Drive] = []
     @Published public private(set) var lastError: String?
     @Published public private(set) var isInitializingRuntime: Bool = false
+    @Published public var isPopoverVisible: Bool = false
+    @Published public var hasActiveMounts: Bool = false
 
     // An explicit runner is the deterministic test/demo seam and remains actor-bound because the
     // shared protocol is intentionally not Sendable. Production leaves this nil and creates the
@@ -412,15 +415,24 @@ public final class DriveScanner: ObservableObject {
         return preservedAny
     }
 
-    /// ponytail: fixed 5s poll, no backoff/jitter — add a `3-preferences` knob if a real drive
-    /// swap ever needs to show up faster, or if this proves too chatty against `anylinuxfs`.
-    public func startPolling(interval: Duration = .seconds(5)) {
+    /// Adaptive polling: 5s when popover is open or drives are active; adapts to 60s when idle/closed.
+    public func startPolling(interval: Duration = .seconds(5), idleInterval: Duration = .seconds(60)) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                try? await Task.sleep(for: interval)
+                guard let self else { break }
+                let currentInterval = (self.isPopoverVisible || self.hasActiveMounts) ? interval : idleInterval
+                try? await Task.sleep(for: currentInterval)
             }
+        }
+    }
+
+    public func setPopoverVisible(_ visible: Bool) {
+        let changed = (self.isPopoverVisible != visible)
+        self.isPopoverVisible = visible
+        if changed && visible {
+            startPolling()
         }
     }
 

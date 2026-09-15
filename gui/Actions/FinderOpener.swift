@@ -29,38 +29,41 @@ extension NSWorkspace: WorkspaceOpening {
         NSWorkspace.shared.activateFileViewerSelecting([url])
         NSLog("ntfsmac: Tier 3 executed (NSWorkspace.shared.activateFileViewerSelecting)")
         
-        // Tier 4: Spawning /usr/bin/open directly via Process
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = [path]
-        do {
-            try process.run()
-            process.waitUntilExit()
-            if process.terminationStatus == 0 {
-                NSLog("ntfsmac: Tier 4 succeeded (/usr/bin/open Process)")
-                return true
+        // Tier 4: Spawning /usr/bin/open directly via Process in background
+        Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = [path]
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus == 0 {
+                    NSLog("ntfsmac: Tier 4 succeeded (/usr/bin/open Process)")
+                    return
+                }
+            } catch {
+                NSLog("ntfsmac: Tier 4 failed with error: \(error)")
             }
-        } catch {
-            NSLog("ntfsmac: Tier 4 failed with error: \(error)")
+            
+            // Tier 5: Spawning /bin/sh shell to open path (mimics terminal exactly)
+            let shProcess = Process()
+            shProcess.executableURL = URL(fileURLWithPath: "/bin/sh")
+            shProcess.arguments = ["-c", "open \"$1\"", "sh", path]
+            do {
+                try shProcess.run()
+                shProcess.waitUntilExit()
+                if shProcess.terminationStatus == 0 {
+                    NSLog("ntfsmac: Tier 5 succeeded (/bin/sh Process)")
+                    return
+                }
+            } catch {
+                NSLog("ntfsmac: Tier 5 failed with error: \(error)")
+            }
+            
+            NSLog("ntfsmac: All 5 open tiers failed")
         }
         
-        // Tier 5: Spawning /bin/sh shell to open path (mimics terminal exactly)
-        let shProcess = Process()
-        shProcess.executableURL = URL(fileURLWithPath: "/bin/sh")
-        shProcess.arguments = ["-c", "open \"$1\"", "sh", path]
-        do {
-            try shProcess.run()
-            shProcess.waitUntilExit()
-            if shProcess.terminationStatus == 0 {
-                NSLog("ntfsmac: Tier 5 succeeded (/bin/sh Process)")
-                return true
-            }
-        } catch {
-            NSLog("ntfsmac: Tier 5 failed with error: \(error)")
-        }
-        
-        NSLog("ntfsmac: All 5 open tiers failed")
-        return false
+        return true
     }
 }
 
@@ -100,40 +103,73 @@ public final class FinderOpener {
             NSLog("ntfsmac: FinderOpener.open not enabled for state \(state)")
             return
         }
-        
-        var path = mountPoint
-        
-        if path == nil || path?.isEmpty == true {
-            NSLog("ntfsmac: mountPoint is nil/empty, querying anylinuxfs status...")
-            let result = runner.run(anylinuxfsPath, ["status"])
-            NSLog("ntfsmac: anylinuxfs status returned exitCode \(result.exitCode)")
-            if result.exitCode == 0 {
-                let lines = result.output.components(separatedBy: .newlines)
-                let searchPrefix = "/dev/\(drive.identifier) on "
-                if let statusLine = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix(searchPrefix) }) {
-                    NSLog("ntfsmac: found matching status line: '\(statusLine)'")
-                    if let onRange = statusLine.range(of: " on "),
-                       let parenRange = statusLine.range(of: " (", options: [], range: onRange.upperBound..<statusLine.endIndex) {
-                        path = String(statusLine[onRange.upperBound..<parenRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-                        NSLog("ntfsmac: parsed path from status: '\(path ?? "nil")'")
+
+        if runner is RealCommandRunner {
+            let pathArg = mountPoint
+            let anylinuxfs = anylinuxfsPath
+            let ident = drive.identifier
+            let fallbackMountPoint = Self.mountPoint(for: drive)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                var path = pathArg
+                if path == nil || path?.isEmpty == true {
+                    NSLog("ntfsmac: mountPoint is nil/empty, querying anylinuxfs status...")
+                    let resolved = await Task.detached(priority: .userInitiated) { () -> String? in
+                        let result = RealCommandRunner().run(anylinuxfs, ["status"])
+                        NSLog("ntfsmac: anylinuxfs status returned exitCode \(result.exitCode)")
+                        if result.exitCode == 0 {
+                            let lines = result.output.components(separatedBy: .newlines)
+                            let searchPrefix = "/dev/\(ident) on "
+                            if let statusLine = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix(searchPrefix) }),
+                               let onRange = statusLine.range(of: " on "),
+                               let parenRange = statusLine.range(of: " (", options: [], range: onRange.upperBound..<statusLine.endIndex) {
+                                return String(statusLine[onRange.upperBound..<parenRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                        }
+                        return nil
+                    }.value
+                    path = resolved
+                }
+
+                let finalPath = path ?? fallbackMountPoint
+                NSLog("ntfsmac: finalPath resolved to: '\(finalPath)'")
+                self.workspace.openPathInFinder(finalPath)
+            }
+        } else {
+            var path = mountPoint
+
+            if path == nil || path?.isEmpty == true {
+                NSLog("ntfsmac: mountPoint is nil/empty, querying anylinuxfs status...")
+                let result = runner.run(anylinuxfsPath, ["status"])
+                NSLog("ntfsmac: anylinuxfs status returned exitCode \(result.exitCode)")
+                if result.exitCode == 0 {
+                    let lines = result.output.components(separatedBy: .newlines)
+                    let searchPrefix = "/dev/\(drive.identifier) on "
+                    if let statusLine = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix(searchPrefix) }) {
+                        NSLog("ntfsmac: found matching status line: '\(statusLine)'")
+                        if let onRange = statusLine.range(of: " on "),
+                           let parenRange = statusLine.range(of: " (", options: [], range: onRange.upperBound..<statusLine.endIndex) {
+                            path = String(statusLine[onRange.upperBound..<parenRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                            NSLog("ntfsmac: parsed path from status: '\(path ?? "nil")'")
+                        }
+                    } else {
+                        NSLog("ntfsmac: no status line matching prefix '\(searchPrefix)'")
                     }
                 } else {
-                    NSLog("ntfsmac: no status line matching prefix '\(searchPrefix)'")
+                    NSLog("ntfsmac: anylinuxfs status failed with output: '\(result.output)'")
                 }
-            } else {
-                NSLog("ntfsmac: anylinuxfs status failed with output: '\(result.output)'")
             }
+
+            let finalPath = path ?? Self.mountPoint(for: drive)
+            NSLog("ntfsmac: finalPath resolved to: '\(finalPath)'")
+            workspace.openPathInFinder(finalPath)
         }
-        
-        let finalPath = path ?? Self.mountPoint(for: drive)
-        NSLog("ntfsmac: finalPath resolved to: '\(finalPath)'")
-        workspace.openPathInFinder(finalPath)
     }
 
     /// Fallback heuristic for when no real mount point is available (see
     /// `open(_:state:mountPoint:)` above) — GUI-PLAN.md "Preferences" table's documented default
     /// mount point convention (`/Volumes/<label>`).
-    static func mountPoint(for drive: Drive) -> String {
+    nonisolated static func mountPoint(for drive: Drive) -> String {
         let name = drive.label.isEmpty ? drive.identifier : drive.label
         return "/Volumes/\(name)"
     }

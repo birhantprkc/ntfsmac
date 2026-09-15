@@ -121,3 +121,31 @@ final class FakeCLIStaging: CLIStaging {
     #expect(helper.calls.count == callsAfterFirstAttempt + 1, "retry() must actually re-invoke staging, not just re-check the filesystem")
     #expect(stager.lastFailureReason == nil)
 }
+
+@MainActor
+private final class DelayingCLIStaging: CLIStaging {
+    var onStage: (@MainActor () -> Void)?
+    func stageCLI(installScriptPath: String) async throws -> CommandResult {
+        onStage?()
+        return CommandResult(output: "ok", exitCode: 0)
+    }
+}
+
+@MainActor @Test func isStagingIsTrueDuringStageExecution() async {
+    let checker = CLIInstallChecker(candidatePaths: ["/nonexistent/bin/ntfsmac"])
+    let helper = DelayingCLIStaging()
+    let stager = CLIAutoStager(
+        helper: helper,
+        checker: checker,
+        bundleResourcesURL: URL(fileURLWithPath: "/Applications/ntfsmac.app/Contents/Resources")
+    )
+
+    var observedStaging = false
+    helper.onStage = {
+        observedStaging = stager.isStaging
+    }
+
+    await stager.stageIfNeeded()
+    #expect(observedStaging == true)
+    #expect(stager.isStaging == false)
+}

@@ -20,6 +20,7 @@ extension HelperClient: CLIStaging {}
 /// so that button can show *why* setup didn't complete instead of a generic dead end.
 @MainActor
 public final class CLIAutoStager: ObservableObject {
+    @Published public private(set) var isStaging: Bool = false
     @Published public private(set) var lastFailureReason: String?
 
     private let helper: any CLIStaging
@@ -78,6 +79,8 @@ public final class CLIAutoStager: ObservableObject {
     private static let connectionRetryAttempts = 6
 
     private func attemptStage() async {
+        isStaging = true
+        defer { isStaging = false }
         checker.check()
         guard let resourcesURL = bundleResourcesURL else {
             lastFailureReason = "ntfsmac.app is missing its bundled setup resources — reinstall the app."

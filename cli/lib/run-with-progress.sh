@@ -36,6 +36,36 @@ run_with_progress() {
     "$@" > "$outfile" 2>/dev/null &
   fi
   local pid=$!
+
+  local orig_int_trap orig_term_trap
+  orig_int_trap="$(trap -p INT 2>/dev/null || true)"
+  orig_term_trap="$(trap -p TERM 2>/dev/null || true)"
+
+  _rwp_cleanup() {
+    local sig="$1"
+    trap - INT TERM
+    local -a process_tree_pids=()
+    local process_pid
+    collect_process_tree "$pid"
+    for process_pid in "${process_tree_pids[@]}"; do
+      kill -TERM "$process_pid" 2>/dev/null || true
+    done
+    sleep 0.5
+    for process_pid in "${process_tree_pids[@]}"; do
+      kill -0 "$process_pid" 2>/dev/null && kill -KILL "$process_pid" 2>/dev/null || true
+    done
+    wait "$pid" 2>/dev/null || true
+    if [[ -n "$orig_int_trap" ]]; then eval "$orig_int_trap"; fi
+    if [[ -n "$orig_term_trap" ]]; then eval "$orig_term_trap"; fi
+    if [[ "$sig" == "INT" ]]; then
+      kill -INT $$ 2>/dev/null || exit 130
+    else
+      kill -TERM $$ 2>/dev/null || exit 143
+    fi
+  }
+  trap '_rwp_cleanup INT' INT
+  trap '_rwp_cleanup TERM' TERM
+
   # `SECONDS` (bash builtin, auto-incrementing since shell start) instead of manually adding up
   # sleep durations — polls on a short 0.2s tick so a fast-exiting child (the common case) isn't
   # taxed a full heartbeat_secs of dead wait just to notice it's already done; heartbeat_secs
@@ -61,6 +91,8 @@ run_with_progress() {
       done
       wait "$pid" 2>/dev/null
       echo "$label: no response after ${timeout_secs}s — backend may be wedged (try 'ntfsmac diagnose')" >&2
+      if [[ -n "$orig_int_trap" ]]; then eval "$orig_int_trap"; else trap - INT; fi
+      if [[ -n "$orig_term_trap" ]]; then eval "$orig_term_trap"; else trap - TERM; fi
       return 124
     fi
     if [[ $elapsed -ge $next_heartbeat ]]; then
@@ -70,4 +102,8 @@ run_with_progress() {
   done
 
   wait "$pid"
+  local status=$?
+  if [[ -n "$orig_int_trap" ]]; then eval "$orig_int_trap"; else trap - INT; fi
+  if [[ -n "$orig_term_trap" ]]; then eval "$orig_term_trap"; else trap - TERM; fi
+  return $status
 }

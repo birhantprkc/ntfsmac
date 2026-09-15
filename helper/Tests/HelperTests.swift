@@ -11,12 +11,20 @@ final class FakeRunner: PrivilegedCommandRunning {
         var arguments: [String]
     }
     private(set) var calls: [Call] = []
+    private(set) var timeouts: [TimeInterval?] = []
     var stubbedResult = CommandResult(output: "ok", exitCode: 0)
 
     private(set) var pipedInputs: [String] = []
 
     func run(_ executablePath: String, _ arguments: [String]) -> CommandResult {
         calls.append(Call(executablePath: executablePath, arguments: arguments))
+        timeouts.append(nil)
+        return stubbedResult
+    }
+
+    func run(_ executablePath: String, _ arguments: [String], timeout: TimeInterval) -> CommandResult {
+        calls.append(Call(executablePath: executablePath, arguments: arguments))
+        timeouts.append(timeout)
         return stubbedResult
     }
 
@@ -733,6 +741,7 @@ private final class ExitSinkProbe: @unchecked Sendable {
     #expect(runner.calls.count == 2)
     #expect(runner.calls[0].arguments == ["list", "--microsoft"])
     #expect(runner.calls[1].arguments == ["list", "--linux"])
+    #expect(runner.timeouts == [10.0, 10.0])
 }
 
 @Test func listDrivesRejectsWhenAnylinuxfsIsMissing() async throws {
@@ -747,4 +756,28 @@ private final class ExitSinkProbe: @unchecked Sendable {
     #expect(data == nil)
     #expect(error?.contains("rejected: anylinuxfs not found") == true)
     #expect(runner.calls.isEmpty)
+}
+
+// MARK: - checkFDA
+
+@Test func checkFDAReturnsTrueWhenInjectedCheckSucceeds() async {
+    let service = HelperService(
+        runner: FakeRunner(),
+        fdaCheck: { true }
+    )
+    let granted = await withCheckedContinuation { continuation in
+        service.checkFDA { continuation.resume(returning: $0) }
+    }
+    #expect(granted == true)
+}
+
+@Test func checkFDAReturnsFalseWhenInjectedCheckFails() async {
+    let service = HelperService(
+        runner: FakeRunner(),
+        fdaCheck: { false }
+    )
+    let granted = await withCheckedContinuation { continuation in
+        service.checkFDA { continuation.resume(returning: $0) }
+    }
+    #expect(granted == false)
 }

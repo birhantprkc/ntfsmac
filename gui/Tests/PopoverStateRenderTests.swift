@@ -65,14 +65,27 @@ private func makeInstalledDependencies() async throws -> (helperInstaller: Helpe
     return (installer, checker, { try? FileManager.default.removeItem(at: dir) })
 }
 
+private final class StubListRunner: PrivilegedCommandRunning {
+    func run(_ executablePath: String, _ arguments: [String]) -> CommandResult {
+        CommandResult(output: "", exitCode: 0)
+    }
+    func run(_ executablePath: String, _ arguments: [String], timeout: TimeInterval) -> CommandResult {
+        CommandResult(output: "", exitCode: 0)
+    }
+    func runPipingStdin(_ input: String, to executablePath: String, _ arguments: [String]) -> CommandResult {
+        CommandResult(output: "", exitCode: 0)
+    }
+}
+
 @MainActor
 private func renderPopover(
     appState: AppState,
     mountController: MountController,
     helperInstaller: HelperInstaller,
     cliInstallChecker: CLIInstallChecker,
-    driveScanner: DriveScanner = DriveScanner(),
-    navigation: PopoverNavigation = PopoverNavigation()
+    driveScanner: DriveScanner = DriveScanner(runner: StubListRunner(), anylinuxfsPath: "/stub/anylinuxfs"),
+    navigation: PopoverNavigation = PopoverNavigation(),
+    cliAutoStager: CLIAutoStager? = nil
 ) -> CGSize? {
     let view = PopoverContentView(
         appState: appState,
@@ -84,7 +97,7 @@ private func renderPopover(
         helperInstaller: helperInstaller,
         helperUninstaller: HelperUninstaller(),
         cliInstallChecker: cliInstallChecker,
-        cliAutoStager: CLIAutoStager(checker: cliInstallChecker),
+        cliAutoStager: cliAutoStager ?? CLIAutoStager(checker: cliInstallChecker),
         settings: Settings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         finderOpener: FinderOpener(),
         helperClient: HelperClient(),
@@ -329,6 +342,44 @@ private func renderPopover(
     #expect(size != nil, "microVM setup popover must render a non-empty image")
     #expect((size?.width ?? 0) > 200)
     #expect((size?.height ?? 0) > 100)
+}
+
+@MainActor @Test func microVMSetupRendersWhenCLIAutoStagerIsStaging() async throws {
+    let (helperInstaller, cliInstallChecker, cleanup) = try await makeInstalledDependencies()
+    defer { cleanup() }
+    let appState = AppState()
+    let controller = MountController(helper: FakeHelper(), appState: appState)
+    let stager = CLIAutoStager(checker: cliInstallChecker)
+
+    let size = renderPopover(
+        appState: appState,
+        mountController: controller,
+        helperInstaller: helperInstaller,
+        cliInstallChecker: cliInstallChecker,
+        cliAutoStager: stager
+    )
+    #expect(size != nil, "popover with cliAutoStager must render a non-empty image")
+}
+
+@MainActor @Test func cliMissingViewRendersProgressStateWithoutCollapsing() async throws {
+    let installer = HelperInstaller(service: InstalledService())
+    await installer.installIfNeeded()
+    let checker = CLIInstallChecker(candidatePaths: ["/nonexistent/ntfsmac"])
+    checker.check()
+    #expect(!checker.isInstalled)
+
+    let appState = AppState()
+    let controller = MountController(helper: FakeHelper(), appState: appState)
+    let stager = CLIAutoStager(checker: checker)
+
+    let size = renderPopover(
+        appState: appState,
+        mountController: controller,
+        helperInstaller: installer,
+        cliInstallChecker: checker,
+        cliAutoStager: stager
+    )
+    #expect(size != nil, "CLIMissingView in progress state must render a non-empty image")
 }
 
 // Minimal fake runner for render tests: returns a fixed `anylinuxfs list` output so DriveScanner

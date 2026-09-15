@@ -72,7 +72,7 @@ private let sampleMultiDiskOutput = """
     #expect(drives[0].identifier == "disk4")
     #expect(drives[0].fsType == "BitLocker")
     #expect(drives[0].label == "")
-    #expect(drives[0].size == "*16.1 GB")
+    #expect(drives[0].size == "16.1 GB")
 }
 
 @Test func parsesUnpartitionedWholeDiskNtfs() {
@@ -86,7 +86,7 @@ private let sampleMultiDiskOutput = """
     #expect(drives[0].identifier == "disk4")
     #expect(drives[0].fsType == "ntfs")
     #expect(drives[0].label == "FlashDrive")
-    #expect(drives[0].size == "*16.1 GB")
+    #expect(drives[0].size == "16.1 GB")
 }
 
 @Test func parsesUnpartitionedWholeDiskBitLockerWithTouchingAsterisk() {
@@ -96,7 +96,7 @@ private let sampleMultiDiskOutput = """
     #expect(drives[0].identifier == "disk4")
     #expect(drives[0].fsType == "BitLocker")
     #expect(drives[0].label == "SECUREDRIVE USB ...")
-    #expect(drives[0].size == "*16.1 GB")
+    #expect(drives[0].size == "16.1 GB")
 }
 
 @Test func parsesUnpartitionedWholeDiskNtfsWithTouchingAsterisk() {
@@ -106,7 +106,7 @@ private let sampleMultiDiskOutput = """
     #expect(drives[0].identifier == "disk4")
     #expect(drives[0].fsType == "ntfs")
     #expect(drives[0].label == "A Very Long Volume Labe...")
-    #expect(drives[0].size == "*16.1 GB")
+    #expect(drives[0].size == "16.1 GB")
 }
 
 @MainActor
@@ -592,7 +592,7 @@ private final class FakeDriveListingHelper: DriveListingHelper {
     #expect(scanner.drives.count == 1)
     #expect(scanner.drives[0].identifier == "disk4")
     #expect(scanner.drives[0].fsType == "BitLocker")
-    #expect(scanner.drives[0].size == "*16.1 GB")
+    #expect(scanner.drives[0].size == "16.1 GB")
 }
 
 @MainActor

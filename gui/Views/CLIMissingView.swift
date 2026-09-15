@@ -34,51 +34,94 @@ public struct CLIMissingView: View {
         self.init(checker: checker, stager: stager, onOpenSettings: {}, onQuit: onQuit)
     }
 
+    private var isSettingUp: Bool {
+        stager.isStaging || stager.lastFailureReason == nil
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 9) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.ntfsRed.opacity(0.14))
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.ntfsRed.opacity(0.28)))
-                    ErrorTriangleGlyph(color: .ntfsRed)
-                }
-                .frame(width: 28, height: 28)
+            if isSettingUp {
+                HStack(spacing: 9) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.12))
+                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.accentColor.opacity(0.24)))
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    .frame(width: 28, height: 28)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("ntfsmac").font(.system(size: 13, weight: .semibold))
-                    Text("Setup required").font(.system(size: 11)).foregroundStyle(Color.ntfsRed.opacity(0.75))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("ntfsmac").font(.system(size: 13, weight: .semibold))
+                        Text("Setting up…").font(.system(size: 11)).foregroundStyle(Color.accentColor)
+                    }
+                    Spacer()
                 }
-                Spacer()
-                Circle().fill(Color.ntfsRed).frame(width: 9, height: 9)
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Setup incomplete")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(Color.ntfsRed.opacity(0.95))
-                Text(stager.lastFailureReason ?? "Finishing setup automatically — this only takes a moment. If it doesn't clear on its own, click Retry.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.ntfsRed.opacity(0.09)))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.ntfsRed.opacity(0.2)))
-            .padding(.horizontal, 10)
-
-            VStack(spacing: 6) {
-                Button {
-                    Task { await stager.retry() }
-                } label: {
-                    Text("Retry").frame(maxWidth: .infinity)
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .controlSize(.regular)
+                    VStack(spacing: 4) {
+                        Text("Setting up microVM environment…")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("First-time setup takes 1–2 minutes to prepare Alpine Linux.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                    }
                 }
-                .buttonStyle(.glassNeutral(colorScheme: colorScheme))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .padding(.horizontal, 10)
+            } else {
+                HStack(spacing: 9) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.ntfsRed.opacity(0.14))
+                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.ntfsRed.opacity(0.28)))
+                        ErrorTriangleGlyph(color: .ntfsRed)
+                    }
+                    .frame(width: 28, height: 28)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("ntfsmac").font(.system(size: 13, weight: .semibold))
+                        Text("Setup required").font(.system(size: 11)).foregroundStyle(Color.ntfsRed.opacity(0.75))
+                    }
+                    Spacer()
+                    Circle().fill(Color.ntfsRed).frame(width: 9, height: 9)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Setup incomplete")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(Color.ntfsRed.opacity(0.95))
+                    Text(stager.lastFailureReason ?? "Setup did not complete. Click Retry to run setup again.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.ntfsRed.opacity(0.09)))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.ntfsRed.opacity(0.2)))
+                .padding(.horizontal, 10)
+
+                VStack(spacing: 6) {
+                    Button {
+                        Task { await stager.retry() }
+                    } label: {
+                        Text("Retry").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassNeutral(colorScheme: colorScheme))
+                }
+                .padding(10)
             }
-            .padding(10)
 
             Divider().padding(.horizontal, 14)
 

@@ -46,12 +46,14 @@ cmd_unmount() {
     local -a mount_points=() menu_lines=()
     local mp server
     local mounts_tmp
-    mounts_tmp="$(mktemp)"
+    mounts_tmp="$(mktemp)" || return 1
+    trap 'rm -f -- "$mounts_tmp"' INT TERM
     # Real exit status, not process substitution — see mount.sh's identical comment.
     # list_active_nfs_mounts() returns 1 (own clear message already printed) if `mount` itself
     # is wedged (a known real failure mode against an unresponsive NFS server).
     if ! list_active_nfs_mounts > "$mounts_tmp"; then
       rm -f "$mounts_tmp"
+      trap - INT TERM
       return 1
     fi
     while IFS=$'\t' read -r mp server; do
@@ -60,6 +62,7 @@ cmd_unmount() {
       menu_lines+=("$mp  ($server)")
     done < "$mounts_tmp"
     rm -f "$mounts_tmp"
+    trap - INT TERM
 
     if [[ ${#mount_points[@]} -eq 0 ]]; then
       echo "unmount: nothing is currently mounted" >&2

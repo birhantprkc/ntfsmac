@@ -58,7 +58,14 @@ security_state_path() {
 security_state_value() {
   local file="$1" key="$2"
   [[ -f "$file" && ! -L "$file" ]] || return 1
-  awk -F= -v wanted="$key" '$1 == wanted { print substr($0, length($1) + 2); exit }' "$file"
+  local k v
+  while IFS='=' read -r k v || [[ -n "$k" ]]; do
+    if [[ "$k" == "$key" ]]; then
+      printf '%s\n' "$v"
+      return 0
+    fi
+  done < "$file"
+  return 1
 }
 
 security_status_output() {
@@ -69,13 +76,16 @@ security_status_output() {
   fi
   [[ -n "$SECURITY_ANYLINUXFS_BIN" && -x "$SECURITY_ANYLINUXFS_BIN" ]] || return 1
   status_tmp="$(mktemp "${TMPDIR:-/tmp}/ntfsmac-security-status.XXXXXX")" || return 1
+  trap 'rm -f -- "$status_tmp"' INT TERM
   if run_with_progress "${NTFSMAC_SECURITY_STATUS_TIMEOUT:-5}" 10 "security-status" \
     "$status_tmp" "$SECURITY_ANYLINUXFS_BIN" status; then
     /bin/cat "$status_tmp"
     rm -f "$status_tmp"
+    trap - INT TERM
     return 0
   fi
   rm -f "$status_tmp"
+  trap - INT TERM
   return 1
 }
 
@@ -272,7 +282,7 @@ security_prepare_mount_transport() {
   [[ "$timeout" =~ ^[0-9]+$ && "$timeout" -gt 0 ]] || timeout="30"
   start=$SECONDS
 
-  while security_mount_job_running "$mount_pid" && (( SECONDS - start < timeout )); do
+  while kill -0 "$mount_pid" 2>/dev/null && security_mount_job_running "$mount_pid" && (( SECONDS - start < timeout )); do
     candidates="$(security_vmnet_bridge_candidates 2>/dev/null || true)"
     candidate=""
     while IFS= read -r candidate; do
@@ -314,7 +324,7 @@ security_prepare_mount_transport() {
         return 0
       fi
     fi
-    sleep 0.1
+    sleep 0.25
   done
   printf 'security_prepare=unknown reason=PREMOUNT_BRIDGE_UNOBSERVED\n'
   return 0
@@ -390,8 +400,10 @@ security_write_state() {
   chmod 700 "$SECURITY_STATE_DIR" 2>/dev/null || return 1
   state_file="$(security_state_path "$session")" || return 1
   state_tmp="$(mktemp "$SECURITY_STATE_DIR/.${session}.XXXXXX")" || return 1
+  trap 'rm -f -- "$state_tmp"' INT TERM
   chmod 600 "$state_tmp" 2>/dev/null || {
     rm -f "$state_tmp"
+    trap - INT TERM
     return 1
   }
   {
@@ -413,6 +425,7 @@ security_write_state() {
     printf 'overall_reason=%s\n' "$overall_reason"
   } > "$state_tmp"
   mv -f "$state_tmp" "$state_file"
+  trap - INT TERM
 }
 
 security_print_state() {
@@ -468,20 +481,24 @@ security_apply_pf() {
     SECURITY_PF_REASON="PF_RULE_RENDER_FAILED"
     return 0
   }
+  trap 'rm -f -- "$rules_file"' INT TERM
   if ! render_pf_anchor "$subnet" "$interface" "$session" > "$rules_file"; then
     rm -f "$rules_file"
+    trap - INT TERM
     SECURITY_PF_REASON="PF_RULE_RENDER_FAILED"
     return 0
   fi
 
   enable_output="$("$SECURITY_PFCTL_BIN" -E 2>&1)" || {
     rm -f "$rules_file"
+    trap - INT TERM
     SECURITY_PF_REASON="PF_ENABLE_FAILED"
     return 0
   }
   SECURITY_PF_TOKEN="$(awk -F': *' '/[Tt]oken/ { print $2; exit }' <<< "$enable_output")"
   if [[ ! "$SECURITY_PF_TOKEN" =~ ^[[:xdigit:]]+$ ]]; then
     rm -f "$rules_file"
+    trap - INT TERM
     SECURITY_PF_TOKEN="unavailable"
     SECURITY_PF_REASON="PF_ENABLE_TOKEN_MISSING_CLEANUP_PENDING"
     return 0
@@ -489,6 +506,7 @@ security_apply_pf() {
 
   if ! "$SECURITY_PFCTL_BIN" -a "$anchor" -f "$rules_file" >/dev/null 2>&1; then
     rm -f "$rules_file"
+    trap - INT TERM
     if security_release_pf "$anchor" "$SECURITY_PF_TOKEN"; then
       SECURITY_PF_TOKEN=""
       SECURITY_PF_REASON="PF_LOAD_FAILED"
@@ -498,6 +516,7 @@ security_apply_pf() {
     return 0
   fi
   rm -f "$rules_file"
+  trap - INT TERM
 
   loaded_rules="$("$SECURITY_PFCTL_BIN" -a "$anchor" -sr 2>/dev/null)" || true
   if ! grep -Eq "label[[:space:]]+\\\"?ntfsmac-${session}-nfs\\\"?([[:space:]]|$)" <<< "$loaded_rules" \

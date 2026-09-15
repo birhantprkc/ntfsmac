@@ -128,7 +128,8 @@ public enum MountTableParser {
     }
 
     static func decodeEscapes(_ value: String) -> String {
-        value
+        if !value.contains("\\") { return value }
+        return value
             .replacingOccurrences(of: "\\040", with: " ")
             .replacingOccurrences(of: "\\011", with: "\t")
             .replacingOccurrences(of: "\\134", with: "\\")

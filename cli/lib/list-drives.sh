@@ -67,21 +67,24 @@ list_mountable_drives() {
   fi
 
   local line tmp
-  local runtime_home="${NTFSMAC_RUNTIME_HOME_OVERRIDE-${HOME:-}}"
-  if [[ -z "$runtime_home" ]]; then
-    runtime_home="$(cd ~ 2>/dev/null && pwd)"
-  fi
+  local runtime_home
 
   local timeout="${NTFSMAC_LIST_TIMEOUT:-20}"
   local label="mount: listing drives"
 
   if load_runtime_alpine_contract_for_list; then
+    runtime_home="$(runtime_alpine_resolve_home)"
     local cache_state
     cache_state="$(runtime_alpine_cache_state "$runtime_home" 2>/dev/null || echo "unknown")"
     if [[ "$cache_state" != "initialized" ]]; then
       runtime_alpine_prepare_cache "$runtime_home" || return 1
       timeout="${NTFSMAC_MOUNT_TIMEOUT:-240}"
       label="mount: setting up runtime & listing drives"
+    fi
+  else
+    runtime_home="${NTFSMAC_RUNTIME_HOME_OVERRIDE-${HOME:-}}"
+    if [[ -z "$runtime_home" ]]; then
+      runtime_home="$(cd ~ 2>/dev/null && pwd)"
     fi
   fi
 
@@ -96,9 +99,11 @@ list_mountable_drives() {
   # fstype is display-only — mount.sh validates --fs-driver itself, never trusting the picker.
   local drive_re='^[[:space:]]*[0-9]+:[[:space:]]+(.*)([*][0-9.]+[[:space:]]+[A-Za-z]+|[[:space:]]+[0-9.]+[[:space:]]+[A-Za-z]+)[[:space:]]+([A-Za-z0-9]+)[[:space:]]*$'
 
-  tmp="$(mktemp)"
-  if ! run_with_progress "$timeout" 5 "$label" "$tmp" "$ANYLINUXFS_BIN" list; then
+  tmp="$(mktemp)" || return 1
+  trap 'rm -f -- "$tmp"' INT TERM
+  if ! HOME="$runtime_home" run_with_progress "$timeout" 5 "$label" "$tmp" "$ANYLINUXFS_BIN" list; then
     rm -f "$tmp"
+    trap - INT TERM
     return 1
   fi
 
@@ -106,6 +111,7 @@ list_mountable_drives() {
     if [[ "$line" =~ $drive_re ]]; then
       local blob="${BASH_REMATCH[1]}" size="${BASH_REMATCH[2]}" ident="${BASH_REMATCH[3]}"
       size="${size#"${size%%[![:space:]]*}"}"
+      size="${size#\*}"
       [[ "$ident" =~ ^disk[0-9]+(s[0-9]+)?$ ]] || continue
       # Derive fstype + label from the TYPE+NAME blob. The GPT type name "Microsoft Basic
       # Data" covers ntfs AND exfat (both use that GPT type), while "Windows_NTFS" is emitted
@@ -151,6 +157,7 @@ list_mountable_drives() {
     fi
   done < "$tmp"
   rm -f "$tmp"
+  trap - INT TERM
 }
 
 # fs_type_for_device <device> — reuses list_mountable_drives' parse to return the fstype
@@ -167,7 +174,8 @@ list_mountable_drives() {
 fs_type_for_device() {
   local device="$1" ident label size fstype rest line
   local tmp
-  tmp="$(mktemp)"
+  tmp="$(mktemp)" || return 1
+  trap 'rm -f -- "$tmp"' INT TERM
   if list_mountable_drives > "$tmp" 2>/dev/null; then
     # Manual tab split (not `IFS=$'\t' read`): an empty label field makes `read` collapse
     # fields and lose fstype — see mount.sh's picker loop for the same fix + rationale.
@@ -179,12 +187,14 @@ fs_type_for_device() {
       fstype="${rest%%$'\t'*}"
       if [[ "$ident" == "$device" ]]; then
         rm -f "$tmp"
+        trap - INT TERM
         printf '%s' "$fstype"
         return 0
       fi
     done < "$tmp"
   fi
   rm -f "$tmp"
+  trap - INT TERM
   printf ''
 }
 
@@ -201,9 +211,11 @@ list_active_nfs_mounts() {
   local line tmp
   local mount_re='^([^[:space:]]+)[[:space:]]+on[[:space:]]+(/Volumes/[^[:space:](]+)[[:space:]]+\(nfs'
 
-  tmp="$(mktemp)"
+  tmp="$(mktemp)" || return 1
+  trap 'rm -f -- "$tmp"' INT TERM
   if ! run_with_progress "${NTFSMAC_MOUNT_LIST_TIMEOUT:-15}" 5 "unmount: listing mounts" "$tmp" mount; then
     rm -f "$tmp"
+    trap - INT TERM
     return 1
   fi
 
@@ -213,4 +225,5 @@ list_active_nfs_mounts() {
     fi
   done < "$tmp"
   rm -f "$tmp"
+  trap - INT TERM
 }

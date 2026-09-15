@@ -318,7 +318,7 @@ STUB
   chmod +x "$STUB_DIR/anylinuxfs"
   run list_mountable_drives
   [ "$status" -eq 0 ]
-  [ "$output" = $'disk4\t\t*16.1 GB\tBitLocker' ]
+  [ "$output" = $'disk4\t\t16.1 GB\tBitLocker' ]
 }
 
 @test "list_mountable_drives surfaces unpartitioned whole-disk NTFS (disk4 on row 0)" {
@@ -330,7 +330,7 @@ STUB
   chmod +x "$STUB_DIR/anylinuxfs"
   run list_mountable_drives
   [ "$status" -eq 0 ]
-  [ "$output" = $'disk4\tFlashDrive\t*16.1 GB\tntfs' ]
+  [ "$output" = $'disk4\tFlashDrive\t16.1 GB\tntfs' ]
 }
 
 @test "list_mountable_drives still excludes partition scheme headers on row 0" {
@@ -354,7 +354,7 @@ STUB
   chmod +x "$STUB_DIR/anylinuxfs"
   run list_mountable_drives
   [ "$status" -eq 0 ]
-  [ "$output" = $'disk4\tSECUREDRIVE USB ...\t*16.1 GB\tBitLocker' ]
+  [ "$output" = $'disk4\tSECUREDRIVE USB ...\t16.1 GB\tBitLocker' ]
 }
 
 @test "list_mountable_drives surfaces whole-disk NTFS with touching asterisk and truncated label" {
@@ -366,6 +366,6 @@ STUB
   chmod +x "$STUB_DIR/anylinuxfs"
   run list_mountable_drives
   [ "$status" -eq 0 ]
-  [ "$output" = $'disk4\tA Very Long Volume Labe...\t*16.1 GB\tntfs' ]
+  [ "$output" = $'disk4\tA Very Long Volume Labe...\t16.1 GB\tntfs' ]
 }
 

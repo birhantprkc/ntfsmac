@@ -122,3 +122,45 @@ make_initialized_cache() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"64 lowercase hexadecimal"* ]]
 }
+
+@test "runtime_alpine_resolve_home prioritizes NTFSMAC_RUNTIME_HOME_OVERRIDE" {
+  export NTFSMAC_RUNTIME_HOME_OVERRIDE="/custom/override/home"
+  run runtime_alpine_resolve_home
+  [ "$status" -eq 0 ]
+  [ "$output" = "/custom/override/home" ]
+}
+
+@test "runtime_alpine_resolve_home resolves SUDO_USER home directory when running as root" {
+  local fake_home="$TEST_HOME/fakeuser"
+  mkdir -p "$fake_home"
+  local fake_bin="$TEST_HOME/bin"
+  mkdir -p "$fake_bin"
+  cat <<'EOF' > "$fake_bin/dscl"
+#!/bin/bash
+if [[ "$1" == "." && "$2" == "-read" && "$3" == "/Users/testuser" && "$4" == "NFSHomeDirectory" ]]; then
+  echo "NFSHomeDirectory: $FAKE_USER_HOME"
+  exit 0
+fi
+exit 1
+EOF
+  chmod +x "$fake_bin/dscl"
+
+  unset NTFSMAC_RUNTIME_HOME_OVERRIDE
+  PATH="$fake_bin:$PATH" NTFSMAC_TEST_EUID=0 SUDO_USER="testuser" FAKE_USER_HOME="$fake_home" run runtime_alpine_resolve_home
+  [ "$status" -eq 0 ]
+  [ "$output" = "$fake_home" ]
+}
+
+@test "runtime_alpine_resolve_home ignores invalid SUDO_USER characters" {
+  unset NTFSMAC_RUNTIME_HOME_OVERRIDE
+  HOME="$TEST_HOME" NTFSMAC_TEST_EUID=0 SUDO_USER="bad;user" run runtime_alpine_resolve_home
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TEST_HOME" ]
+}
+
+@test "runtime_alpine_resolve_home falls back to HOME when not root" {
+  unset NTFSMAC_RUNTIME_HOME_OVERRIDE
+  HOME="$TEST_HOME" NTFSMAC_TEST_EUID=501 SUDO_USER="otheruser" run runtime_alpine_resolve_home
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TEST_HOME" ]
+}

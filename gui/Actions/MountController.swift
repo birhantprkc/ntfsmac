@@ -112,19 +112,43 @@ public final class MountController: ObservableObject {
     /// Identifiers of every currently mounted drive — used by `DriveListView` to mark rows.
     public var mountedDriveIDs: Set<String> { Set(mountedDrives.map(\.id)) }
 
+    @Published public var isPopoverVisible: Bool = false
+
+    public var hasInFlightOperations: Bool {
+        credentialRequiredDeviceID != nil
+    }
+
+    private var pollingKnownDrives: (@MainActor () -> [Drive])?
+    private var activePollingInterval: Duration = .seconds(5)
+    private var idlePollingInterval: Duration = .seconds(60)
+
     /// Reconcile on launch and every bounded polling interval. The closure is evaluated on the
     /// main actor so the scanner's latest `@Published` drive metadata can be reused safely.
     public func startPolling(
         knownDrives: @escaping @MainActor () -> [Drive],
-        interval: Duration = .seconds(5)
+        interval: Duration = .seconds(5),
+        idleInterval: Duration = .seconds(60)
     ) {
+        self.pollingKnownDrives = knownDrives
+        self.activePollingInterval = interval
+        self.idlePollingInterval = idleInterval
         pollTask?.cancel()
         pollTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.reconcile(knownDrives: knownDrives())
-                try? await Task.sleep(for: interval)
+                let hasActive = !self.mountedDrives.isEmpty || self.hasInFlightOperations
+                let currentInterval = (self.isPopoverVisible || hasActive) ? interval : idleInterval
+                try? await Task.sleep(for: currentInterval)
             }
+        }
+    }
+
+    public func setPopoverVisible(_ visible: Bool) {
+        let changed = (self.isPopoverVisible != visible)
+        self.isPopoverVisible = visible
+        if changed && visible, let knownDrives = pollingKnownDrives {
+            startPolling(knownDrives: knownDrives, interval: activePollingInterval, idleInterval: idlePollingInterval)
         }
     }
 

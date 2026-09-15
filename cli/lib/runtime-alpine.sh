@@ -63,14 +63,53 @@ runtime_alpine_load() {
   export ALPINE_RUNTIME_BASE_DIR ALPINE_RUNTIME_VERSION
 }
 
+runtime_alpine_resolve_home() {
+  if [[ -n "${NTFSMAC_RUNTIME_HOME_OVERRIDE:-}" ]]; then
+    printf '%s\n' "$NTFSMAC_RUNTIME_HOME_OVERRIDE"
+    return 0
+  fi
+
+  local target_user="${SUDO_USER:-}"
+  local euid="${NTFSMAC_TEST_EUID:-${EUID:-$(id -u)}}"
+  if [[ "$euid" -eq 0 && -n "$target_user" && "$target_user" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+    local home_dir
+    home_dir="$(dscl . -read "/Users/$target_user" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory:[[:space:]]*//p' || true)"
+    if [[ -n "$home_dir" && -d "$home_dir" ]]; then
+      printf '%s\n' "$home_dir"
+      return 0
+    fi
+  fi
+
+  if [[ -n "${HOME:-}" && -d "${HOME:-}" ]]; then
+    printf '%s\n' "$HOME"
+    return 0
+  fi
+
+  local fallback
+  fallback="$(cd ~ 2>/dev/null && pwd)"
+  if [[ -n "$fallback" ]]; then
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+
+  printf '%s\n' "${HOME:-}"
+}
+export -f runtime_alpine_resolve_home 2>/dev/null || true
+
 runtime_alpine_cache_path() {
-  local runtime_home="$1"
+  local runtime_home="${1:-}"
+  if [[ -z "$runtime_home" ]]; then
+    runtime_home="$(runtime_alpine_resolve_home)"
+  fi
   printf '%s/.anylinuxfs/%s\n' "$runtime_home" "$ALPINE_RUNTIME_BASE_DIR"
 }
 
 # Prints one fixed, privacy-safe state token. It never prints paths or cache contents.
 runtime_alpine_cache_state() {
-  local runtime_home="$1" base marker fstab
+  local runtime_home="${1:-}" base marker fstab
+  if [[ -z "$runtime_home" ]]; then
+    runtime_home="$(runtime_alpine_resolve_home)"
+  fi
   base="$(runtime_alpine_cache_path "$runtime_home")"
 
   if [[ ! -e "$base" && ! -L "$base" ]]; then
@@ -130,7 +169,10 @@ runtime_alpine_preserve_cache() {
 # never removed. New/legacy caches are left untouched until anylinuxfs performs the related mount
 # initialization, so merely installing, diagnosing, or opening Settings never forces a download.
 runtime_alpine_prepare_cache() {
-  local runtime_home="$1" state base
+  local runtime_home="${1:-}" state base
+  if [[ -z "$runtime_home" ]]; then
+    runtime_home="$(runtime_alpine_resolve_home)"
+  fi
   state="$(runtime_alpine_cache_state "$runtime_home")" || return 1
   base="$(runtime_alpine_cache_path "$runtime_home")"
 

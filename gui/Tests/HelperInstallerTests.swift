@@ -364,6 +364,37 @@ private final class BlessCallTracker: @unchecked Sendable {
     }
 }
 
+private final class RegistrationRepairTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _repairCalled = false
+    private var _repairLabel: String?
+
+    var repairCalled: Bool {
+        lock.lock(); defer { lock.unlock() }; return _repairCalled
+    }
+
+    var repairLabel: String? {
+        lock.lock(); defer { lock.unlock() }; return _repairLabel
+    }
+
+    func repair(label: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        _repairCalled = true
+        _repairLabel = label
+        return true
+    }
+
+    func copyDictionary(label: CFString) -> CFDictionary? {
+        lock.lock()
+        defer { lock.unlock() }
+        if _repairCalled {
+            return [:] as CFDictionary
+        }
+        return nil
+    }
+}
+
 @MainActor
 @Test func realHelperInstallServiceFailsWhenBlessSucceedsButLaunchdDoesNotRegisterService() {
     let service = RealHelperInstallService(
@@ -371,12 +402,51 @@ private final class BlessCallTracker: @unchecked Sendable {
         authorizationFree: { _ in },
         jobBless: { _, _, _, _ in true },
         jobCopyDictionary: { _, _ in nil },
+        repairRegistration: { _ in false },
         verificationPollDelayNanoseconds: 0,
         verificationMaxAttempts: 1
     )
     let outcome = service.bless(label: "com.khr898.ntfsmac.helper")
     guard case .failed(let message) = outcome else {
         Issue.record("Expected .failed outcome when launchd does not register the service, got \(outcome)")
+        return
+    }
+    #expect(message.contains("launchd refused to register the service"))
+    #expect(message.contains("System Settings"))
+}
+
+@MainActor
+@Test func realHelperInstallServiceRepairsRegistrationWhenBlessSucceedsButLaunchdDoesNotRegisterInitially() {
+    let tracker = RegistrationRepairTracker()
+    let service = RealHelperInstallService(
+        authorizationCreate: { (errAuthorizationSuccess, AuthorizationRef(bitPattern: 0xDEADBEEF)!) },
+        authorizationFree: { _ in },
+        jobBless: { _, _, _, _ in true },
+        jobCopyDictionary: { _, label in tracker.copyDictionary(label: label) },
+        repairRegistration: { label in tracker.repair(label: label) },
+        verificationPollDelayNanoseconds: 0,
+        verificationMaxAttempts: 1
+    )
+    let outcome = service.bless(label: "com.khr898.ntfsmac.helper")
+    #expect(outcome == .installed)
+    #expect(tracker.repairCalled == true)
+    #expect(tracker.repairLabel == "com.khr898.ntfsmac.helper")
+}
+
+@MainActor
+@Test func realHelperInstallServiceFailsWhenBothBlessVerificationAndRepairFail() {
+    let service = RealHelperInstallService(
+        authorizationCreate: { (errAuthorizationSuccess, AuthorizationRef(bitPattern: 0xDEADBEEF)!) },
+        authorizationFree: { _ in },
+        jobBless: { _, _, _, _ in true },
+        jobCopyDictionary: { _, _ in nil },
+        repairRegistration: { _ in false },
+        verificationPollDelayNanoseconds: 0,
+        verificationMaxAttempts: 1
+    )
+    let outcome = service.bless(label: "com.khr898.ntfsmac.helper")
+    guard case .failed(let message) = outcome else {
+        Issue.record("Expected .failed outcome when both bless verification and repair fail, got \(outcome)")
         return
     }
     #expect(message.contains("launchd refused to register the service"))

@@ -59,6 +59,7 @@ public struct RealHelperInstallService: HelperInstallService {
     private let authorizationFree: @Sendable (AuthorizationRef) -> Void
     private let jobBless: @Sendable (CFString, CFString, AuthorizationRef?, UnsafeMutablePointer<Unmanaged<CFError>?>?) -> Bool
     private let jobCopyDictionary: @Sendable (CFString, CFString) -> CFDictionary?
+    private let repairRegistration: @Sendable (String) -> Bool
     private let verificationPollDelayNanoseconds: UInt64
     private let verificationMaxAttempts: Int
 
@@ -83,6 +84,7 @@ public struct RealHelperInstallService: HelperInstallService {
             return SMJobBless(domain, label, auth, error)
         },
         jobCopyDictionary: @escaping @Sendable (CFString, CFString) -> CFDictionary? = { SMJobCopyDictionary($0, $1)?.takeRetainedValue() },
+        repairRegistration: @escaping @Sendable (String) -> Bool = { RealHelperInstallService.defaultRepairRegistration(label: $0) },
         verificationPollDelayNanoseconds: UInt64 = 100_000_000,
         verificationMaxAttempts: Int = 10
     ) {
@@ -90,8 +92,23 @@ public struct RealHelperInstallService: HelperInstallService {
         self.authorizationFree = authorizationFree
         self.jobBless = jobBless
         self.jobCopyDictionary = jobCopyDictionary
+        self.repairRegistration = repairRegistration
         self.verificationPollDelayNanoseconds = verificationPollDelayNanoseconds
         self.verificationMaxAttempts = verificationMaxAttempts
+    }
+
+    public static func defaultRepairRegistration(label: String) -> Bool {
+        let plistPath = "/Library/LaunchDaemons/\(label).plist"
+        guard FileManager.default.fileExists(atPath: plistPath) else {
+            return false
+        }
+        let script = "do shell script \"launchctl enable system/\(label) && launchctl bootstrap system \(plistPath)\" with administrator privileges"
+        guard let appleScript = NSAppleScript(source: script) else {
+            return false
+        }
+        var errorDict: NSDictionary?
+        appleScript.executeAndReturnError(&errorDict)
+        return errorDict == nil
     }
 
     /// `SMJobCopyDictionary` is the documented, real way to check whether a `SMJobBless`-style
@@ -143,6 +160,20 @@ public struct RealHelperInstallService: HelperInstallService {
             }
             if verificationPollDelayNanoseconds > 0 {
                 Thread.sleep(forTimeInterval: Double(verificationPollDelayNanoseconds) / 1_000_000_000.0)
+            }
+        }
+
+        if !registered {
+            if repairRegistration(label) {
+                for _ in 0..<verificationMaxAttempts {
+                    if isInstalled(label: label) {
+                        registered = true
+                        break
+                    }
+                    if verificationPollDelayNanoseconds > 0 {
+                        Thread.sleep(forTimeInterval: Double(verificationPollDelayNanoseconds) / 1_000_000_000.0)
+                    }
+                }
             }
         }
 

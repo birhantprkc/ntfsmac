@@ -397,7 +397,7 @@ public enum DiagnoseSummary {
                 label: "Privileged helper",
                 value: "Disabled in launchd",
                 status: .warning,
-                explanation: "The helper is disabled in launchd. Enable it in System Settings ▸ General ▸ Login Items & Extensions (Allow in the Background) or run: sudo launchctl enable system/com.khr898.ntfsmac.helper"
+                explanation: "The helper is disabled in launchd. Reinstall via Preferences ▸ Reinstall privileged helper, enable it in System Settings ▸ General ▸ Login Items & Extensions (Allow in the Background), or run: sudo launchctl enable system/com.khr898.ntfsmac.helper"
             )
         } else if status == "unregistered" {
             return .init(

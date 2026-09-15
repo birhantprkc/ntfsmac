@@ -59,6 +59,16 @@ public final class HelperUninstaller: ObservableObject {
             }
 
             state = .done(depsResult.output)
+            // Reset user-level TCC permissions and persisted FDA prompt flags so the helper toggle
+            // is completely removed from System Settings and no stale state persists.
+            let tccProcess = Process()
+            tccProcess.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            tccProcess.arguments = ["reset", "SystemPolicyAllFiles", helperMachServiceName]
+            try? tccProcess.run()
+            tccProcess.waitUntilExit()
+
+            UserDefaults.standard.removeObject(forKey: "com.khr898.ntfsmac.hasShownInitialFDAPrompt")
+            UserDefaults.standard.removeObject(forKey: "com.khr898.ntfsmac.settings.preservePrivateRelay")
             onUninstallComplete?()
         } catch {
             state = .failed(MountController.describe(error))

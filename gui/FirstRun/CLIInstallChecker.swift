@@ -13,6 +13,7 @@ import HelperShared
 @MainActor
 public final class CLIInstallChecker: ObservableObject {
     @Published public private(set) var isInstalled = false
+    public let shouldEnforceInUI: Bool
 
     private let candidatePaths: [String]
     private let anylinuxfsPaths: [String]
@@ -30,13 +31,18 @@ public final class CLIInstallChecker: ObservableObject {
     /// `removeDependencies` deleted the prefix), producing a cryptic "command not found" shell
     /// error instead of `CLIMissingView`'s Retry button.
     public init(
-        candidatePaths: [String] = ntfsmacCandidatePrefixes.map { "\($0)/bin/ntfsmac" },
-        anylinuxfsPaths: [String] = ntfsmacCandidatePrefixes.map { "\($0)/bin/anylinuxfs" },
-        fileManager: FileManager = .default
+        candidatePaths: [String]? = nil,
+        anylinuxfsPaths: [String]? = nil,
+        fileManager: FileManager = .default,
+        shouldEnforceInUI: Bool? = nil
     ) {
-        self.candidatePaths = candidatePaths
-        self.anylinuxfsPaths = anylinuxfsPaths
+        let defaultCandidates = ntfsmacCandidatePrefixes.map { "\($0)/bin/ntfsmac" }
+        self.candidatePaths = candidatePaths ?? defaultCandidates
+        self.anylinuxfsPaths = anylinuxfsPaths ?? ntfsmacCandidatePrefixes.map { "\($0)/bin/anylinuxfs" }
         self.fileManager = fileManager
+        // In production the GUI is standalone with its helper (no CLI dependency).
+        // UI gating only applies when explicitly injected in test harnesses.
+        self.shouldEnforceInUI = shouldEnforceInUI ?? (candidatePaths != nil)
     }
 
     public func check() {

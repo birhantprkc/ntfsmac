@@ -201,6 +201,10 @@ public final class DriveScanner: ObservableObject {
         setupTask?.cancel()
     }
 
+    public func checkCacheState() -> AlpineRuntimeCacheState {
+        cacheStateProvider()
+    }
+
     public func simulateInitializingRuntime(_ initializing: Bool) {
         self.isInitializingRuntime = initializing
     }

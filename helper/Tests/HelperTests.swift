@@ -418,7 +418,7 @@ private final class UnknownSecurityCleanupRunner: PrivilegedCommandRunning {
     }
     #expect(data != nil)
     #expect(error == nil)
-    #expect(runner.calls.count == 5)
+    #expect(runner.calls.count == 6)
     // rm-plist and rm-binary (and the reply, implicit above) must complete before the
     // self-destructive bootout — reversing this order is the exact race that made every
     // uninstall attempt fail with "can't communicate with helper" on a real machine.
@@ -429,7 +429,9 @@ private final class UnknownSecurityCleanupRunner: PrivilegedCommandRunning {
     #expect(runner.calls[3].executablePath == "/usr/bin/tccutil")
     #expect(runner.calls[3].arguments == ["reset", "All", helperMachServiceName])
     #expect(runner.calls[4].executablePath == "/bin/launchctl")
-    #expect(runner.calls[4].arguments == ["bootout", "system/\(helperMachServiceName)"])
+    #expect(runner.calls[4].arguments == ["enable", "system/\(helperMachServiceName)"])
+    #expect(runner.calls[5].executablePath == "/bin/launchctl")
+    #expect(runner.calls[5].arguments == ["bootout", "system/\(helperMachServiceName)"])
 }
 
 // MARK: - resolveNtfsmacPrefix / ntfsmacPrefix injection (fixed prefix vs brew-tap fallback)

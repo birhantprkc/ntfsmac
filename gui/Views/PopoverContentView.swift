@@ -79,6 +79,7 @@ public struct PopoverContentView: View {
     @State private var showFDAPrompt = false
     @State private var bitLockerDrive: Drive?
     @State private var bitLockerRecoveryKey = ""
+    @State private var isExecutingStartupPipeline = false
 
     public init(
         appState: AppState,
@@ -236,6 +237,9 @@ public struct PopoverContentView: View {
     /// 1. Helper Status -> 2. Alpine Environment -> 3. Live FDA Verification -> 4. Drive Discovery
     private func executeStartupHealthPipeline() async {
         guard helperInstaller.state == .installed else { return }
+        guard !isExecutingStartupPipeline else { return }
+        isExecutingStartupPipeline = true
+        defer { isExecutingStartupPipeline = false }
 
         // Fast filesystem stat check (<1ms)
         if driveScanner.checkCacheState() != .initialized {
@@ -247,7 +251,7 @@ public struct PopoverContentView: View {
         showFDAPrompt = !hasFDA
 
         // Drive discovery & mount table reconciliation
-        await refreshAll()
+        await mountController.reconcile(knownDrives: driveScanner.drives)
     }
 
     private var mainContent: some View {
@@ -278,7 +282,7 @@ public struct PopoverContentView: View {
                 }
             }
 
-            if cliAutoStager.isStaging || driveScanner.isInitializingRuntime {
+            if driveScanner.isInitializingRuntime {
                 microVMSetupView
             } else {
                 // Before anything is mounted: the detected drives are the primary list, not "other" —

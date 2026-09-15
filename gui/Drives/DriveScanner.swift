@@ -307,12 +307,26 @@ public final class DriveScanner: ObservableObject {
             isInitializingRuntime = false
             setupTask = nil
         }
+
+        var binaryToRun = anylinuxfsPath
+        if runner == nil && !FileManager.default.isExecutableFile(atPath: binaryToRun) {
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline && !FileManager.default.isExecutableFile(atPath: binaryToRun) {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                let resolved = resolveAnylinuxfsPath()
+                if FileManager.default.isExecutableFile(atPath: resolved) {
+                    binaryToRun = resolved
+                    break
+                }
+            }
+        }
+
         let probeResult: CommandResult
         if let runner {
-            probeResult = runner.run(anylinuxfsPath, ["list"])
+            probeResult = runner.run(binaryToRun, ["list"])
         } else {
             probeResult = await Self.runOffMain(
-                anylinuxfsPath,
+                binaryToRun,
                 ["list"],
                 timeout: firstRunTimeout
             )
@@ -424,8 +438,11 @@ public final class DriveScanner: ObservableObject {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refresh()
                 guard let self else { break }
+                if !self.isInitializingRuntime && self.setupTask == nil {
+                    await self.refresh()
+                }
+                guard !Task.isCancelled else { break }
                 let currentInterval = (self.isPopoverVisible || self.hasActiveMounts) ? interval : idleInterval
                 try? await Task.sleep(for: currentInterval)
             }

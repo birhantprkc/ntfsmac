@@ -209,7 +209,12 @@ public struct PreferencesView: View {
                         ProgressView().controlSize(.small)
                     }
                     Button("Reinstall…") {
-                        Task { await installer.install() }
+                        Task {
+                            await installer.install()
+                            if installer.state == .installed {
+                                onBack?()
+                            }
+                        }
                     }
                 }
             }

@@ -249,7 +249,7 @@ SWIFT
   rm -rf "$cli_stage"
 
   echo "package-app: ad-hoc signing helper binary"
-  if ! codesign -s - --force --identifier "$helper_label" "$APP/Contents/Library/LaunchServices/$helper_label" 2>&1; then
+  if ! codesign -s - --force --identifier "$helper_label" -r="designated => identifier \"$helper_label\"" "$APP/Contents/Library/LaunchServices/$helper_label" 2>&1; then
     echo "package-app: HARD-STOP — failed to sign helper binary" >&2
     exit 1
   fi
@@ -258,7 +258,7 @@ SWIFT
   # at this point (no meaningful identifier to set), and the outer-bundle sign below fully
   # re-signs it anyway once Contents/Info.plist is in place.
   echo "package-app: ad-hoc signing outer bundle"
-  if ! codesign -s - --force "$APP" 2>&1; then
+  if ! codesign -s - --force -r='designated => identifier "com.khr898.ntfsmac"' "$APP" 2>&1; then
     echo "package-app: HARD-STOP — failed to sign $APP" >&2
     exit 1
   fi

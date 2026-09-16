@@ -135,7 +135,7 @@ public enum MountTableParser {
             .replacingOccurrences(of: "\\134", with: "\\")
     }
 
-    private static func deviceIdentifier(from source: String) -> String? {
+    static func deviceIdentifier(from source: String) -> String? {
         let range = NSRange(source.startIndex..., in: source)
         guard let match = ntfsmacHost.firstMatch(in: source, range: range),
               let device = capture(match, 1, in: source),
@@ -153,6 +153,41 @@ public enum MountTableParser {
               let range = Range(match.range(at: index), in: line)
         else { return nil }
         return String(line[range])
+    }
+}
+
+/// In-memory kernel mount table inspection using Darwin's `getmntinfo`.
+/// Avoids spawning `/sbin/mount -t nfs` subprocesses for production reconciliation.
+public enum NativeMountTableReader {
+    public static func readNFS() -> [NFSMountTableEntry] {
+        var statfsPtr: UnsafeMutablePointer<statfs>?
+        let count = getmntinfo(&statfsPtr, MNT_NOWAIT)
+        guard count > 0, let buffer = statfsPtr else { return [] }
+        var entries: [NFSMountTableEntry] = []
+        for i in 0..<Int(count) {
+            let item = buffer[i]
+            let fstype = withUnsafeBytes(of: item.f_fstypename) { raw in
+                raw.bindMemory(to: CChar.self).baseAddress.map { String(cString: $0) } ?? ""
+            }
+            guard fstype == "nfs" else { continue }
+            let mntfromname = withUnsafeBytes(of: item.f_mntfromname) { raw in
+                raw.bindMemory(to: CChar.self).baseAddress.map { String(cString: $0) } ?? ""
+            }
+            let mntonname = withUnsafeBytes(of: item.f_mntonname) { raw in
+                raw.bindMemory(to: CChar.self).baseAddress.map { String(cString: $0) } ?? ""
+            }
+            let isReadOnly = (item.f_flags & UInt32(MNT_RDONLY)) != 0
+            let decodedSource = MountTableParser.decodeEscapes(mntfromname)
+            let decodedMount = MountTableParser.decodeEscapes(mntonname)
+            let device = MountTableParser.deviceIdentifier(from: decodedSource)
+            entries.append(NFSMountTableEntry(
+                source: decodedSource,
+                mountPoint: decodedMount,
+                isReadOnly: isReadOnly,
+                deviceIdentifier: device
+            ))
+        }
+        return entries
     }
 }
 
@@ -177,24 +212,24 @@ public struct RealMountSnapshotProvider: MountSnapshotProviding {
 
     public func snapshot() async -> MountSnapshot {
         let statusResult: CommandResult
-        let mountResult: CommandResult
+        let tableMounts: [NFSMountTableEntry]
+        let sourcesSucceeded: Bool
         if let runner {
             // Explicit runners are a deterministic test seam and execute on the caller's actor.
             statusResult = runner.run(anylinuxfsPath, ["status"])
-            mountResult = runner.run(mountPath, ["-t", "nfs"])
+            let mountResult = runner.run(mountPath, ["-t", "nfs"])
+            tableMounts = mountResult.exitCode == 0
+                ? MountTableParser.parse(mountResult.output)
+                : []
+            sourcesSucceeded = statusResult.exitCode == 0 && mountResult.exitCode == 0
         } else {
-            // Production polling must never block the menu-bar UI while Process waits. Each
-            // reconciliation waits for its own reads before scheduling the next poll, so a slow
-            // source cannot create an unbounded queue of subprocesses.
-            async let statusTask = Self.runOffMain(anylinuxfsPath, ["status"])
-            async let mountTask = Self.runOffMain(mountPath, ["-t", "nfs"])
-            (statusResult, mountResult) = await (statusTask, mountTask)
+            // Production polling: reads mounts in-memory directly from Darwin kernel with 0 subprocesses.
+            statusResult = await Self.runOffMain(anylinuxfsPath, ["status"])
+            tableMounts = NativeMountTableReader.readNFS()
+            sourcesSucceeded = statusResult.exitCode == 0
         }
         let statusMounts = statusResult.exitCode == 0
             ? AnyLinuxFSStatusParser.parse(statusResult.output)
-            : []
-        let tableMounts = mountResult.exitCode == 0
-            ? MountTableParser.parse(mountResult.output)
             : []
 
         var observed: [ObservedMount] = statusMounts.map { statusMount in
@@ -222,7 +257,6 @@ public struct RealMountSnapshotProvider: MountSnapshotProviding {
         }
 
         observed.sort { $0.deviceIdentifier < $1.deviceIdentifier }
-        let sourcesSucceeded = statusResult.exitCode == 0 && mountResult.exitCode == 0
         let everyStatusMountWasPaired = statusMounts.allSatisfy { statusMount in
             tableMounts.contains {
                 $0.mountPoint == statusMount.mountPoint

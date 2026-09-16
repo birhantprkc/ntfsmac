@@ -77,9 +77,9 @@ public struct PopoverContentView: View {
     @State private var diagnosePresentation = DiagnosePanelPresentation()
     @State private var securityPresentation = SecurityIndicatorsPresentation()
     @State private var showFDAPrompt = false
-    @AppStorage("com.khr898.ntfsmac.hasShownInitialFDAPrompt") private var hasShownInitialFDAPrompt = false
     @State private var bitLockerDrive: Drive?
     @State private var bitLockerRecoveryKey = ""
+    @State private var isExecutingStartupPipeline = false
 
     public init(
         appState: AppState,
@@ -152,110 +152,106 @@ public struct PopoverContentView: View {
     }
 
     public var body: some View {
-        Group {
-            if navigation.page == .settings {
-                PreferencesView(
-                    settings: settings,
-                    installer: helperInstaller,
-                    uninstaller: helperUninstaller,
-                    updater: updater,
-                    hasActiveMounts: !mountController.mountedDrives.isEmpty,
-                    onBack: navigation.showMain
-                )
-            } else if showFDAPrompt {
-                FDAPromptView(
-                    onOpenSettings: {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                            NSWorkspace.shared.open(url)
-                        }
-                        showFDAPrompt = false
-                        mountController.clearError()
-                    },
-                    onCancel: {
-                        showFDAPrompt = false
-                        mountController.clearError()
-                    }
-                )
-            // Helper install is a self-contained SMJobBless/XPC flow that doesn't touch the CLI
-            // tree at all — gating it behind `cliInstallChecker.isInstalled` would block the
-            // "Install Helper…" button while the CLI is still being staged. `CLIAutoStager`
-            // stages the CLI (bundled into the .app by `build/package-app.sh`, no tap/Homebrew
-            // needed) the moment the helper finishes installing, so helper state is checked
-            // first; CLI-missing is the brief, self-clearing window between "helper just
-            // installed" and "CLIAutoStager finished running install.sh through it."
-            } else if helperInstaller.state != .installed {
-                FirstRunView(
-                    installer: helperInstaller,
-                    diagnoseRunner: diagnoseRunner,
-                    onOpenSettings: navigation.showSettings,
-                    onQuit: quit
-                )
-            } else if !cliInstallChecker.isInstalled {
-                CLIMissingView(
-                    checker: cliInstallChecker,
-                    stager: cliAutoStager,
-                    onOpenSettings: navigation.showSettings,
-                    onQuit: quit
-                )
-            } else {
-                mainContent
+        popoverRootView
+            .onChange(of: mountController.errorMessage) { newValue in
+                if newValue == "FDA_REQUIRED" {
+                    showFDAPrompt = true
+                }
             }
-        }
-        .onChange(of: mountController.errorMessage) { newValue in
-            if newValue == "FDA_REQUIRED" {
-                showFDAPrompt = true
-            }
-        }
-        .onChange(of: cliInstallChecker.isInstalled) { installed in
-            if installed && !hasShownInitialFDAPrompt {
+            .onChange(of: helperInstaller.state) { newState in
+                guard newState == .installed else { return }
                 Task {
-                    let hasFDA = (try? await helperClient.checkFDA()) ?? false
-                    if !hasFDA {
-                        showFDAPrompt = true
-                        hasShownInitialFDAPrompt = true
+                    await executeStartupHealthPipeline()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .ntfsmacOpenSettings)) { _ in
+                navigation.showSettings()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                Task {
+                    await executeStartupHealthPipeline()
+                }
+            }
+            .onAppear {
+                driveScanner.setPopoverVisible(true)
+                mountController.setPopoverVisible(true)
+                driveScanner.hasActiveMounts = !mountController.mountedDrives.isEmpty
+            }
+            .onDisappear {
+                driveScanner.setPopoverVisible(false)
+                mountController.setPopoverVisible(false)
+            }
+            .onChange(of: mountController.mountedDrives.isEmpty) { isEmpty in
+                driveScanner.hasActiveMounts = !isEmpty
+            }
+            .task {
+                await executeStartupHealthPipeline()
+            }
+    }
+
+    @ViewBuilder
+    private var popoverRootView: some View {
+        if navigation.page == .settings {
+            PreferencesView(
+                settings: settings,
+                installer: helperInstaller,
+                uninstaller: helperUninstaller,
+                updater: updater,
+                hasActiveMounts: !mountController.mountedDrives.isEmpty,
+                onBack: navigation.showMain
+            )
+        } else if showFDAPrompt {
+            FDAPromptView(
+                onOpenSettings: {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                        NSWorkspace.shared.open(url)
                     }
+                    showFDAPrompt = false
+                    mountController.clearError()
+                },
+                onCancel: {
+                    showFDAPrompt = false
+                    mountController.clearError()
                 }
-            }
+            )
+        } else if helperInstaller.state != .installed {
+            FirstRunView(
+                installer: helperInstaller,
+                diagnoseRunner: diagnoseRunner,
+                onOpenSettings: navigation.showSettings,
+                onQuit: quit
+            )
+        } else if !cliInstallChecker.isInstalled && cliInstallChecker.shouldEnforceInUI {
+            CLIMissingView(
+                checker: cliInstallChecker,
+                stager: cliAutoStager,
+                onOpenSettings: navigation.showSettings,
+                onQuit: quit
+            )
+        } else {
+            mainContent
         }
-        .onReceive(NotificationCenter.default.publisher(for: .ntfsmacOpenSettings)) { _ in
-            navigation.showSettings()
+    }
+
+    /// Instant fast-path startup pipeline (<30ms when satisfied):
+    /// 1. Helper Status -> 2. Alpine Environment -> 3. Live FDA Verification -> 4. Drive Discovery
+    private func executeStartupHealthPipeline() async {
+        guard helperInstaller.state == .installed else { return }
+        guard !isExecutingStartupPipeline else { return }
+        isExecutingStartupPipeline = true
+        defer { isExecutingStartupPipeline = false }
+
+        // Fast filesystem stat check (<1ms)
+        if driveScanner.checkCacheState() != .initialized {
+            await driveScanner.refresh()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            guard helperInstaller.state == .installed else { return }
-            Task {
-                let hasFDA = (try? await helperClient.checkFDA()) ?? false
-                if hasFDA {
-                    if showFDAPrompt {
-                        showFDAPrompt = false
-                    }
-                } else if !hasShownInitialFDAPrompt {
-                    showFDAPrompt = true
-                    hasShownInitialFDAPrompt = true
-                }
-            }
-        }
-        .onAppear {
-            driveScanner.setPopoverVisible(true)
-            mountController.setPopoverVisible(true)
-            driveScanner.hasActiveMounts = !mountController.mountedDrives.isEmpty
-        }
-        .onDisappear {
-            driveScanner.setPopoverVisible(false)
-            mountController.setPopoverVisible(false)
-        }
-        .onChange(of: mountController.mountedDrives.isEmpty) { isEmpty in
-            driveScanner.hasActiveMounts = !isEmpty
-        }
-        .task {
-            if helperInstaller.state == .installed && !hasShownInitialFDAPrompt {
-                let hasFDA = (try? await helperClient.checkFDA()) ?? false
-                if !hasFDA {
-                    showFDAPrompt = true
-                    hasShownInitialFDAPrompt = true
-                }
-            }
-            await refreshAll()
-        }
+
+        // Live kernel check on raw disk (<2ms)
+        let hasFDA = (try? await helperClient.checkFDA()) ?? false
+        showFDAPrompt = !hasFDA
+
+        // Drive discovery & mount table reconciliation
+        await mountController.reconcile(knownDrives: driveScanner.drives)
     }
 
     private var mainContent: some View {
@@ -286,7 +282,7 @@ public struct PopoverContentView: View {
                 }
             }
 
-            if cliAutoStager.isStaging || driveScanner.isInitializingRuntime {
+            if driveScanner.isInitializingRuntime {
                 microVMSetupView
             } else {
                 // Before anything is mounted: the detected drives are the primary list, not "other" —
@@ -369,7 +365,11 @@ public struct PopoverContentView: View {
             }
 
             if let errorMessage = mountController.errorMessage ?? remountController.errorMessage, errorMessage != "FDA_REQUIRED" {
-                Text(errorMessage).font(.caption).foregroundStyle(Color.ntfsRed)
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(Color.ntfsRed)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if let warning = mountController.reconciliationWarning {

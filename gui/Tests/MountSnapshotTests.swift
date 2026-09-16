@@ -395,3 +395,10 @@ private struct SnapshotCommandRunner: PrivilegedCommandRunning {
     #expect(appState.state == .mountedUnknown)
     #expect(controller.reconciliationWarning?.hasPrefix("UNMOUNT_NOT_OBSERVED") == true)
 }
+
+@MainActor
+@Test func nativeMountTableReaderReadsWithoutThrowing() {
+    let entries = NativeMountTableReader.readNFS()
+    #expect(entries.allSatisfy { $0.deviceIdentifier == nil || validateDevice($0.deviceIdentifier!) })
+}
+

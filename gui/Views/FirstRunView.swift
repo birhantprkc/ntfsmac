@@ -51,6 +51,40 @@ public struct FirstRunView: View {
                     .foregroundStyle(Color.ntfsGreen)
             case .denied(let message), .failed(let message):
                 errorCard(message: message)
+
+                if message.contains("refused to register") || message.contains("disabled") {
+                    HStack(spacing: 6) {
+                        Button {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        } label: {
+                            Text("Login Items…")
+                                .font(.system(size: 11))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassNeutral(colorScheme: colorScheme))
+
+                        Button {
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString(
+                                "sudo launchctl enable system/com.khr898.ntfsmac.helper && sudo launchctl bootstrap system /Library/LaunchDaemons/com.khr898.ntfsmac.helper.plist",
+                                forType: .string
+                            )
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 10))
+                                Text("Copy Command")
+                                    .font(.system(size: 11))
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassNeutral(colorScheme: colorScheme))
+                    }
+                }
+
                 Button {
                     Task { await installer.install() }
                 } label: {
